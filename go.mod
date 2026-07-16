@@ -1,4 +1,4 @@
-module github.com/aeon022/missionctl
+module github.com/aeon022/missionctl-cli
 
 go 1.22
 

@@ -7,12 +7,13 @@ import (
 	"github.com/spf13/cobra"
 )
 
-const version = "0.1.0"
+// Version is set at build time via -ldflags "-X github.com/aeon022/missionctl-cli/cmd.Version=v1.2.3".
+var Version = "dev"
 
 var rootCmd = &cobra.Command{
 	Use:     "missionctl",
 	Short:   "Umbrella CLI for the missionctl suite",
-	Version: version,
+	Version: Version,
 	Long: `missionctl — control plane for your personal terminal stack.
 
 Commands:
