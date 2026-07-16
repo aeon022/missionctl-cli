@@ -43,6 +43,7 @@ brews:
       token: "{{ .Env.HOMEBREW_TAP_TOKEN }}"
     directory: Formula
     homepage: https://github.com/aeon022/missionctl
+    license: MIT
     description: "Umbrella CLI for the missionctl suite - doctor, status, setup wizard"
     install: |
       bin.install "missionctl"
