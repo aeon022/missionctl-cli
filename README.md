@@ -15,10 +15,13 @@ cd missionctl
 chmod +x setup.sh
 ./setup.sh
 
+# Dashboard — briefing across all tools, jump into any of them with 1-8
+missionctl
+
 # Check the suite's health
 missionctl doctor
 
-# Daily briefing across all tools
+# Daily briefing across all tools (plain text, for scripts/piping)
 missionctl status
 
 # Interactive setup wizard
@@ -31,6 +34,7 @@ missionctl init
 
 | Command             | What it does                                                        |
 |----------------------|----------------------------------------------------------------------|
+| `missionctl`         | Dashboard TUI — same briefing as `status`, press 1-8/enter to jump into a tool |
 | `missionctl doctor`  | Installed tools, env vars, MCP registration, DB freshness, daemons  |
 | `missionctl status`  | Daily briefing: tasks, calendar, timer, diary, budget, habits, notes, mail |
 | `missionctl init`    | Interactive wizard: API key, Obsidian vault path, install missing tools |
@@ -40,6 +44,14 @@ missionctl init
 ---
 
 ## CLI Reference
+
+### `missionctl` (no arguments)
+
+Opens a Bubble Tea dashboard: one row per tool, using the exact same
+DB-reading logic as `status`. Navigate with `j`/`k` or `↑`/`↓`, jump into a
+tool's own TUI with its number key or `enter` — the dashboard suspends
+itself (via `tea.ExecProcess`) while the tool runs and resumes when it
+exits. `q`/`esc` quits.
 
 ### `missionctl doctor`
 
