@@ -16,12 +16,16 @@ var rootCmd = &cobra.Command{
 	Version: Version,
 	Long: `missionctl — control plane for your personal terminal stack.
 
+Run with no arguments for the dashboard TUI (today's briefing across every
+tool, with a keypress to jump straight into any of them).
+
 Commands:
   doctor   Check which tools are installed and env vars set
   status   Daily briefing from all tool databases
   init     Interactive setup wizard
   install  Build and install every tool in one go
   update   Pull latest source and rebuild every tool`,
+	RunE: runDashboard,
 }
 
 func Execute() {
