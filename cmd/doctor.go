@@ -1,9 +1,12 @@
 package cmd
 
 import (
+	"encoding/json"
 	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
+	"time"
 
 	"github.com/charmbracelet/lipgloss"
 	"github.com/spf13/cobra"
@@ -95,9 +98,129 @@ func runDoctor(cmd *cobra.Command, args []string) error {
 	}
 
 	fmt.Println()
+	checkMCPConfig(checkMark, crossMark, nameStyle, pathStyle)
+
+	fmt.Println()
+	checkDatabases(checkMark, dashMark, nameStyle, pathStyle)
+
+	fmt.Println()
+	checkDaemons(checkMark, crossMark, dashMark, nameStyle, pathStyle)
+
+	fmt.Println()
 
 	if len(missing) > 0 {
 		return fmt.Errorf("%d tool(s) not found: %v", len(missing), missing)
 	}
 	return nil
+}
+
+// mcpTools lists every tool that ships an `<tool> mcp` subcommand (all of
+// `tools` except missionctl itself, which has no MCP server).
+var mcpTools = []string{"mailctl", "calctl", "taskctl", "notectl", "budgetctl", "postctl", "diaryctl", "timectl", "habctl"}
+
+func checkMCPConfig(checkMark, crossMark string, nameStyle, pathStyle lipgloss.Style) {
+	fmt.Println("  MCP registration (~/.claude.json):")
+	fmt.Println()
+
+	home, _ := os.UserHomeDir()
+	path := filepath.Join(home, ".claude.json")
+	data, err := os.ReadFile(path)
+	if err != nil {
+		fmt.Printf("  %s  %s\n", crossMark, pathStyle.Render("~/.claude.json not found — no MCP servers registered yet"))
+		return
+	}
+
+	var cfg struct {
+		McpServers map[string]any `json:"mcpServers"`
+	}
+	if err := json.Unmarshal(data, &cfg); err != nil {
+		fmt.Printf("  %s  %s\n", crossMark, pathStyle.Render("~/.claude.json could not be parsed: "+err.Error()))
+		return
+	}
+
+	for _, name := range mcpTools {
+		if _, ok := cfg.McpServers[name]; ok {
+			fmt.Printf("  %s %s  registered\n", nameStyle.Render(name), checkMark)
+		} else {
+			fmt.Printf("  %s %s  not registered — add: %s\n",
+				nameStyle.Render(name), crossMark,
+				pathStyle.Render(fmt.Sprintf(`claude mcp add %s -- %s mcp`, name, name)))
+		}
+	}
+}
+
+// toolDB maps a tool name to its on-disk SQLite database path. postctl is
+// intentionally excluded — its work is deferred, see POSTCTL_AUDIT.md.
+var toolDB = map[string]string{
+	"mailctl":   "~/Library/Application Support/mailctl/mailctl.db",
+	"calctl":    "~/Library/Application Support/calctl/calctl.db",
+	"taskctl":   "~/Library/Application Support/taskctl/taskctl.db",
+	"notectl":   "~/.local/share/notectl/notes.db",
+	"budgetctl": "~/.local/share/budgetctl/budget.db",
+	"habctl":    "~/.local/share/habctl/habits.db",
+	"timectl":   "~/.local/share/timectl/time.db",
+	"diaryctl":  "~/.local/share/diaryctl/diary.db",
+}
+
+// toolDBOrder keeps the database status output in a stable, readable order.
+var toolDBOrder = []string{"mailctl", "calctl", "taskctl", "notectl", "budgetctl", "habctl", "timectl", "diaryctl"}
+
+func checkDatabases(checkMark, dashMark string, nameStyle, pathStyle lipgloss.Style) {
+	fmt.Println("  Databases:")
+	fmt.Println()
+
+	for _, name := range toolDBOrder {
+		path := expandHome(toolDB[name])
+		info, err := os.Stat(path)
+		if err != nil {
+			fmt.Printf("  %s %s  not created yet\n", nameStyle.Render(name), dashMark)
+			continue
+		}
+		age := time.Since(info.ModTime())
+		fmt.Printf("  %s %s  last synced %s\n", nameStyle.Render(name), checkMark, pathStyle.Render(formatAge(age)+" ago"))
+	}
+}
+
+func formatAge(d time.Duration) string {
+	switch {
+	case d < time.Minute:
+		return "just now"
+	case d < time.Hour:
+		return fmt.Sprintf("%dm", int(d.Minutes()))
+	case d < 24*time.Hour:
+		return fmt.Sprintf("%dh", int(d.Hours()))
+	default:
+		return fmt.Sprintf("%dd", int(d.Hours()/24))
+	}
+}
+
+type daemon struct {
+	tool  string
+	label string
+}
+
+// Only diaryctl and taskctl ship a launchd daemon today.
+var daemons = []daemon{
+	{"diaryctl", "sh.missionctl.diaryctl"},
+	{"taskctl", "com.taskctl.daemon"},
+}
+
+func checkDaemons(checkMark, crossMark, dashMark string, nameStyle, pathStyle lipgloss.Style) {
+	fmt.Println("  launchd daemons:")
+	fmt.Println()
+
+	home, _ := os.UserHomeDir()
+	for _, d := range daemons {
+		plistPath := filepath.Join(home, "Library", "LaunchAgents", d.label+".plist")
+		if _, err := os.Stat(plistPath); err != nil {
+			fmt.Printf("  %s %s  not installed — see `%s daemon --install`\n", nameStyle.Render(d.tool), dashMark, d.tool)
+			continue
+		}
+		if err := exec.Command("launchctl", "list", d.label).Run(); err != nil {
+			fmt.Printf("  %s %s  plist exists but not loaded — try `launchctl load -w %s`\n",
+				nameStyle.Render(d.tool), crossMark, pathStyle.Render(plistPath))
+			continue
+		}
+		fmt.Printf("  %s %s  loaded\n", nameStyle.Render(d.tool), checkMark)
+	}
 }
