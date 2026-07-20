@@ -19,7 +19,9 @@ var rootCmd = &cobra.Command{
 Commands:
   doctor   Check which tools are installed and env vars set
   status   Daily briefing from all tool databases
-  init     Interactive setup wizard`,
+  init     Interactive setup wizard
+  install  Build and install every tool in one go
+  update   Pull latest source and rebuild every tool`,
 }
 
 func Execute() {
@@ -33,4 +35,6 @@ func init() {
 	rootCmd.AddCommand(doctorCmd)
 	rootCmd.AddCommand(statusCmd)
 	rootCmd.AddCommand(initCmd)
+	rootCmd.AddCommand(installCmd)
+	rootCmd.AddCommand(updateCmd)
 }

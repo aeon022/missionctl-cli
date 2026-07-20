@@ -74,6 +74,18 @@ func runStatus(_ *cobra.Command, _ []string) error {
 	budgetLine := budgetStatus(now)
 	fmt.Printf("  %s %s\n", labelStyle.Render("Budget"), budgetLine)
 
+	// Habits
+	habitLine := habitStatus(now)
+	fmt.Printf("  %s %s\n", labelStyle.Render("Habits"), habitLine)
+
+	// Notes
+	noteLine := noteStatus(now)
+	fmt.Printf("  %s %s\n", labelStyle.Render("Notes"), noteLine)
+
+	// Mail
+	mailLine := mailStatus()
+	fmt.Printf("  %s %s\n", labelStyle.Render("Mail"), mailLine)
+
 	fmt.Println()
 
 	_ = dashStyle
@@ -234,4 +246,65 @@ func budgetStatus(now time.Time) string {
 	}
 
 	return fmt.Sprintf("€%.0f spent this month", total.Float64)
+}
+
+func habitStatus(now time.Time) string {
+	db, err := openDB("~/.local/share/habctl/habits.db")
+	if err != nil || db == nil {
+		return "–  not configured"
+	}
+	defer db.Close()
+
+	var total int
+	if err := db.QueryRow(`SELECT COUNT(*) FROM habits WHERE archived = 0`).Scan(&total); err != nil {
+		return "–  not configured"
+	}
+
+	today := now.Format("2006-01-02")
+	var doneToday int
+	_ = db.QueryRow(
+		`SELECT COUNT(DISTINCT habit_id) FROM checkins WHERE date = ?`, today,
+	).Scan(&doneToday)
+
+	if total == 0 {
+		return "no habits tracked"
+	}
+	return fmt.Sprintf("%d/%d done today", doneToday, total)
+}
+
+func noteStatus(now time.Time) string {
+	db, err := openDB("~/.local/share/notectl/notes.db")
+	if err != nil || db == nil {
+		return "–  not configured"
+	}
+	defer db.Close()
+
+	var total int
+	if err := db.QueryRow(`SELECT COUNT(*) FROM notes`).Scan(&total); err != nil {
+		return "–  not configured"
+	}
+
+	today := now.Format("2006-01-02")
+	var createdToday int
+	_ = db.QueryRow(`SELECT COUNT(*) FROM notes WHERE created LIKE ?`, today+"%").Scan(&createdToday)
+
+	if createdToday > 0 {
+		return fmt.Sprintf("%d notes · %d created today", total, createdToday)
+	}
+	return fmt.Sprintf("%d notes", total)
+}
+
+func mailStatus() string {
+	db, err := openDB("~/Library/Application Support/mailctl/mailctl.db")
+	if err != nil || db == nil {
+		return "–  not configured"
+	}
+	defer db.Close()
+
+	var unread int
+	if err := db.QueryRow(`SELECT COUNT(*) FROM messages WHERE read = 0`).Scan(&unread); err != nil {
+		return "–  not configured"
+	}
+
+	return fmt.Sprintf("%d unread", unread)
 }
