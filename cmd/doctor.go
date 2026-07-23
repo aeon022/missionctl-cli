@@ -132,14 +132,33 @@ func checkMCPConfig(checkMark, crossMark string, nameStyle, pathStyle lipgloss.S
 
 	var cfg struct {
 		McpServers map[string]any `json:"mcpServers"`
+		Projects   map[string]struct {
+			McpServers map[string]any `json:"mcpServers"`
+		} `json:"projects"`
 	}
 	if err := json.Unmarshal(data, &cfg); err != nil {
 		fmt.Printf("  %s  %s\n", crossMark, pathStyle.Render("~/.claude.json could not be parsed: "+err.Error()))
 		return
 	}
 
+	// `claude mcp add` defaults to project scope, storing the server under
+	// projects[cwd].mcpServers rather than the top-level (user-scope)
+	// mcpServers — checking only the top level made every project-scoped
+	// registration look "not registered" even though it works fine.
+	registered := map[string]bool{}
+	for name := range cfg.McpServers {
+		registered[name] = true
+	}
+	if cwd, err := os.Getwd(); err == nil {
+		if proj, ok := cfg.Projects[cwd]; ok {
+			for name := range proj.McpServers {
+				registered[name] = true
+			}
+		}
+	}
+
 	for _, name := range mcpTools {
-		if _, ok := cfg.McpServers[name]; ok {
+		if registered[name] {
 			fmt.Printf("  %s %s  registered\n", nameStyle.Render(name), checkMark)
 		} else {
 			fmt.Printf("  %s %s  not registered — add: %s\n",
