@@ -86,23 +86,23 @@ func (m dashboardModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case "ctrl+c", "q", "esc":
 			return m, tea.Quit
 		case "j", "down":
-			if m.cursor < len(dashboardCards)-1 {
-				m.cursor++
+			if m.cursor+cardCols < len(dashboardCards) {
+				m.cursor += cardCols
 			}
 			return m, nil
 		case "k", "up":
-			if m.cursor > 0 {
-				m.cursor--
+			if m.cursor-cardCols >= 0 {
+				m.cursor -= cardCols
 			}
 			return m, nil
 		case "h", "left":
-			if m.cursor >= 2 {
-				m.cursor -= 2
+			if m.cursor%cardCols != 0 {
+				m.cursor--
 			}
 			return m, nil
 		case "l", "right":
-			if m.cursor < len(dashboardCards)-2 {
-				m.cursor += 2
+			if m.cursor%cardCols != cardCols-1 && m.cursor < len(dashboardCards)-1 {
+				m.cursor++
 			}
 			return m, nil
 		case "r":
@@ -291,7 +291,7 @@ func (m dashboardModel) View() string {
 	}
 
 	footer := fmt.Sprintf(
-		"%s/%s move  %s/%s columns  %s or number jump in  %s refresh  %s quit",
+		"%s/%s row  %s/%s column  %s or number jump in  %s refresh  %s quit",
 		dashKeyStyle.Render("↑"), dashKeyStyle.Render("↓"),
 		dashKeyStyle.Render("←"), dashKeyStyle.Render("→"),
 		dashKeyStyle.Render("enter"),

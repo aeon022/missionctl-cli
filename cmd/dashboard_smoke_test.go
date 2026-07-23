@@ -16,16 +16,47 @@ func TestDashboardViewRenders(t *testing.T) {
 }
 
 func TestDashboardCursorMovement(t *testing.T) {
+	// Cards form a 2-column grid, so j/down must move a full row (+cardCols)
+	// and l/right must move one column (+1) — not the other way around.
 	m := newDashboardModel()
 	mi, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("j")})
 	m = mi.(dashboardModel)
-	if m.cursor != 1 {
-		t.Errorf("expected cursor 1 after j, got %d", m.cursor)
+	if m.cursor != cardCols {
+		t.Errorf("expected cursor %d after j (down one row), got %d", cardCols, m.cursor)
 	}
 	mi, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("k")})
 	m = mi.(dashboardModel)
 	if m.cursor != 0 {
-		t.Errorf("expected cursor 0 after k, got %d", m.cursor)
+		t.Errorf("expected cursor 0 after k (up one row), got %d", m.cursor)
+	}
+	mi, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("l")})
+	m = mi.(dashboardModel)
+	if m.cursor != 1 {
+		t.Errorf("expected cursor 1 after l (right one column), got %d", m.cursor)
+	}
+	mi, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("h")})
+	m = mi.(dashboardModel)
+	if m.cursor != 0 {
+		t.Errorf("expected cursor 0 after h (left one column), got %d", m.cursor)
+	}
+}
+
+func TestDashboardCursorMovementStaysInBounds(t *testing.T) {
+	// l/right at the last column of a row must not wrap into the next row.
+	m := newDashboardModel()
+	m.cursor = 1 // last column of row 0
+	mi, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("l")})
+	m = mi.(dashboardModel)
+	if m.cursor != 1 {
+		t.Errorf("expected cursor to stay at 1 (right edge of row), got %d", m.cursor)
+	}
+
+	// h/left at the first column of a row must not wrap into the previous row.
+	m.cursor = 2 // first column of row 1
+	mi, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("h")})
+	m = mi.(dashboardModel)
+	if m.cursor != 2 {
+		t.Errorf("expected cursor to stay at 2 (left edge of row), got %d", m.cursor)
 	}
 }
 
