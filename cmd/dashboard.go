@@ -157,17 +157,23 @@ var (
 			Background(lipgloss.Color("57")).
 			Padding(0, 2)
 
-	dashClockStyle = lipgloss.NewStyle().Foreground(dashMuted)
-	dashFootStyle  = lipgloss.NewStyle().Foreground(dashSubtle)
-	dashKeyStyle   = lipgloss.NewStyle().Foreground(dashFg).Bold(true)
-	dashErrStyle   = lipgloss.NewStyle().Foreground(dashErrColor).Bold(true)
+	dashTaglineStyle = lipgloss.NewStyle().Foreground(dashSubtle).Italic(true)
+	dashRuleStyle    = lipgloss.NewStyle().Foreground(dashSubtle)
+	dashClockStyle   = lipgloss.NewStyle().Foreground(dashMuted)
+	dashFootStyle    = lipgloss.NewStyle().Foreground(dashSubtle)
+	dashKeyStyle     = lipgloss.NewStyle().Foreground(dashFg).Bold(true)
+	dashErrStyle     = lipgloss.NewStyle().Foreground(dashErrColor).Bold(true)
 )
 
-const cardCols = 2
+const (
+	cardCols  = 2
+	rowIndent = "  "
+	cardGap   = "   "
+)
 
 func (m dashboardModel) cardWidth() int {
-	// two columns, one space gap, minus a little breathing room on narrow terms
-	w := (m.width - 3) / cardCols
+	// two columns with a visible gap between them, plus the row indent
+	w := (m.width - len(rowIndent) - len(cardGap)) / cardCols
 	if w < 24 {
 		w = 24
 	}
@@ -230,29 +236,58 @@ func truncate(s string, max int) string {
 	return string(r[:max-1]) + "…"
 }
 
+// renderHeader draws the full-width MISSIONCTL banner: badge + tagline on
+// the left, live clock flush right, and a rule underneath. The tagline is
+// dropped first if the terminal is too narrow to fit everything.
+func (m dashboardModel) renderHeader() string {
+	w := m.width
+	if w < 40 {
+		w = 40
+	}
+	contentW := w - len(rowIndent)
+
+	badge := dashTitleStyle.Render("🛰  MISSIONCTL")
+	tagline := dashTaglineStyle.Render("mission control for your terminal")
+	clock := dashClockStyle.Render(m.now.Format("Mon Jan 02 · 15:04:05"))
+
+	left := badge + "  " + tagline
+	gap := contentW - lipgloss.Width(left) - lipgloss.Width(clock)
+	if gap < 1 {
+		left = badge // not enough room — drop the tagline first
+		gap = contentW - lipgloss.Width(left) - lipgloss.Width(clock)
+	}
+	if gap < 1 {
+		gap = 1
+	}
+
+	line := rowIndent + left + strings.Repeat(" ", gap) + clock
+	rule := rowIndent + dashRuleStyle.Render(strings.Repeat("─", contentW))
+	return line + "\n" + rule
+}
+
 func (m dashboardModel) View() string {
 	var b strings.Builder
 
-	title := dashTitleStyle.Render("MISSIONCTL")
-	clock := dashClockStyle.Render(m.now.Format("Mon Jan 02 · 15:04:05"))
-	headerGap := m.width - lipgloss.Width(title) - lipgloss.Width(clock) - 4
-	if headerGap < 1 {
-		headerGap = 1
-	}
-	b.WriteString("\n  " + title + strings.Repeat(" ", headerGap) + clock + "\n\n")
+	b.WriteString("\n" + m.renderHeader() + "\n\n")
 
-	// grid: 2 cards per row
+	// grid: 2 cards per row, with a visible gap between columns
 	for row := 0; row < len(dashboardCards); row += cardCols {
 		var cells []string
 		for col := 0; col < cardCols && row+col < len(dashboardCards); col++ {
+			if col > 0 {
+				cells = append(cells, cardGap)
+			}
 			cells = append(cells, m.renderCard(row+col))
 		}
-		b.WriteString("  " + lipgloss.JoinHorizontal(lipgloss.Top, cells...) + "\n")
+		rowBlock := lipgloss.JoinHorizontal(lipgloss.Top, cells...)
+		for _, l := range strings.Split(rowBlock, "\n") {
+			b.WriteString(rowIndent + l + "\n")
+		}
 	}
 
 	b.WriteString("\n")
 	if m.err != nil {
-		b.WriteString("  " + dashErrStyle.Render("⚠ last launch failed: "+m.err.Error()) + "\n")
+		b.WriteString(rowIndent + dashErrStyle.Render("⚠ last launch failed: "+m.err.Error()) + "\n")
 	}
 
 	footer := fmt.Sprintf(
@@ -263,13 +298,13 @@ func (m dashboardModel) View() string {
 		dashKeyStyle.Render("r"),
 		dashKeyStyle.Render("q"),
 	)
-	b.WriteString("  " + dashFootStyle.Render(footer) + "\n")
+	b.WriteString(rowIndent + dashFootStyle.Render(footer) + "\n")
 
 	return b.String()
 }
 
 func runDashboard(_ *cobra.Command, _ []string) error {
-	p := tea.NewProgram(newDashboardModel())
+	p := tea.NewProgram(newDashboardModel(), tea.WithAltScreen())
 	_, err := p.Run()
 	return err
 }
