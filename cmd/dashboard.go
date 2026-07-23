@@ -27,7 +27,7 @@ var dashboardCards = []dashboardCard{
 	{"4", "📔", "Diary", "diaryctl", lipgloss.Color("212"), func(_ time.Time) string { return diaryStatus() }},
 	{"5", "💰", "Budget", "budgetctl", lipgloss.Color("208"), budgetStatus},
 	{"6", "🔥", "Habits", "habctl", lipgloss.Color("203"), habitStatus},
-	{"7", "🗒", "Notes", "notectl", lipgloss.Color("135"), noteStatus},
+	{"7", "📝", "Notes", "notectl", lipgloss.Color("135"), noteStatus},
 	{"8", "✉", "Mail", "mailctl", lipgloss.Color("33"), func(_ time.Time) string { return mailStatus() }},
 }
 
