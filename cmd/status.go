@@ -65,6 +65,23 @@ func openDB(path string) (*sql.DB, error) {
 	return db, nil
 }
 
+// syncAge reports how long ago a tool's database file was last written —
+// its DB file's mtime updates on every sync, so this is the same signal
+// `missionctl doctor` already shows (toolDB/formatAge, defined in
+// doctor.go), reused here instead of duplicated so a card's data can't be
+// old enough to be misleading without it being visible right on the card.
+func syncAge(tool string) string {
+	path, ok := toolDB[tool]
+	if !ok {
+		return ""
+	}
+	info, err := os.Stat(expandHome(path))
+	if err != nil {
+		return "not synced yet"
+	}
+	return formatAge(time.Since(info.ModTime())) + " ago"
+}
+
 func runStatus(_ *cobra.Command, _ []string) error {
 	headerStyle := lipgloss.NewStyle().Bold(true)
 	labelStyle := lipgloss.NewStyle().Width(12)
@@ -78,8 +95,11 @@ func runStatus(_ *cobra.Command, _ []string) error {
 	// so a card's extra detail line — added so the same data reads well in
 	// both this plain view and the dashboard's boxes — doesn't run on
 	// looking like part of the summary or drift under the wrong column.
-	printStatus := func(label, value string) {
-		lines := strings.Split(value, "\n")
+	printStatus := func(label, tool string, s cardStatus) {
+		lines := strings.Split(s.text, "\n")
+		if age := syncAge(tool); age != "" {
+			lines = append(lines, "synced "+age)
+		}
 		fmt.Printf("  %s %s\n", labelStyle.Render(label), lines[0])
 		for _, l := range lines[1:] {
 			fmt.Printf("  %s %s\n", labelStyle.Render(""), detailStyle.Render(l))
@@ -90,20 +110,20 @@ func runStatus(_ *cobra.Command, _ []string) error {
 	fmt.Printf("  %s\n", headerStyle.Render(fmt.Sprintf("missionctl status — %s", dateStr)))
 	fmt.Println()
 
-	printStatus("Tasks", taskStatus())
-	printStatus("Calendar", calStatus(now))
-	printStatus("Timer", timerStatus(now))
-	printStatus("Diary", diaryStatus())
-	printStatus("Budget", budgetStatus(now))
-	printStatus("Habits", habitStatus(now))
-	printStatus("Notes", noteStatus(now))
-	printStatus("Mail", mailStatus())
+	printStatus("Tasks", "taskctl", taskStatus())
+	printStatus("Calendar", "calctl", calStatus(now))
+	printStatus("Timer", "timectl", timerStatus(now))
+	printStatus("Diary", "diaryctl", diaryStatus())
+	printStatus("Budget", "budgetctl", budgetStatus(now))
+	printStatus("Habits", "habctl", habitStatus(now))
+	printStatus("Notes", "notectl", noteStatus(now))
+	printStatus("Mail", "mailctl", mailStatus())
 
 	fmt.Println()
 	return nil
 }
 
-func taskStatus() string {
+func taskStatus() cardStatus {
 	var resp struct {
 		Overdue  int `json:"overdue"`
 		DueToday int `json:"due_today"`
@@ -113,10 +133,10 @@ func taskStatus() string {
 		} `json:"data"`
 	}
 	if !runToolJSON("taskctl", []string{"today", "--json"}, &resp) {
-		return "–  not configured"
+		return cardStatus{text: "–  not configured"}
 	}
 	if resp.Overdue == 0 && resp.DueToday == 0 {
-		return "nothing due today"
+		return cardStatus{text: "nothing due today"}
 	}
 	var parts []string
 	if resp.DueToday > 0 {
@@ -126,13 +146,20 @@ func taskStatus() string {
 		parts = append(parts, fmt.Sprintf("%d overdue", resp.Overdue))
 	}
 	summary := strings.Join(parts, " · ")
-	if len(resp.Data) == 0 {
-		return summary
+	if len(resp.Data) > 0 {
+		summary += "\n" + resp.Data[0].Title
 	}
-	return summary + "\n" + resp.Data[0].Title
+	urgency := urgencyNormal
+	switch {
+	case resp.Overdue > 0:
+		urgency = urgencyCritical
+	case resp.DueToday > 0:
+		urgency = urgencyWarn
+	}
+	return cardStatus{text: summary, urgency: urgency}
 }
 
-func calStatus(now time.Time) string {
+func calStatus(now time.Time) cardStatus {
 	var resp struct {
 		Count int `json:"count"`
 		Data  []struct {
@@ -141,21 +168,21 @@ func calStatus(now time.Time) string {
 		} `json:"data"`
 	}
 	if !runToolJSON("calctl", []string{"list", "--today", "--format", "json"}, &resp) {
-		return "–  not configured"
+		return cardStatus{text: "–  not configured"}
 	}
 	if resp.Count == 0 {
-		return "no events today"
+		return cardStatus{text: "no events today"}
 	}
 	summary := fmt.Sprintf("%d events today", resp.Count)
 	for _, e := range resp.Data {
 		if e.StartTime.After(now) {
-			return fmt.Sprintf("%s\nnext: %s at %s", summary, e.Title, e.StartTime.Format("15:04"))
+			return cardStatus{text: fmt.Sprintf("%s\nnext: %s at %s", summary, e.Title, e.StartTime.Format("15:04"))}
 		}
 	}
-	return summary
+	return cardStatus{text: summary}
 }
 
-func timerStatus(_ time.Time) string {
+func timerStatus(_ time.Time) cardStatus {
 	var resp struct {
 		TotalHuman string `json:"total_human"`
 		Entries    []struct {
@@ -165,7 +192,7 @@ func timerStatus(_ time.Time) string {
 		} `json:"entries"`
 	}
 	if !runToolJSON("timectl", []string{"today", "--json"}, &resp) {
-		return "–  not configured"
+		return cardStatus{text: "–  not configured"}
 	}
 	todayLine := fmt.Sprintf("%s today", resp.TotalHuman)
 	for _, e := range resp.Entries {
@@ -174,16 +201,16 @@ func timerStatus(_ time.Time) string {
 			if e.Project != "" {
 				task = fmt.Sprintf("%s (%s)", e.Task, e.Project)
 			}
-			return "running: " + task + "\n" + todayLine
+			return cardStatus{text: "running: " + task + "\n" + todayLine}
 		}
 	}
-	return "no timer running\n" + todayLine
+	return cardStatus{text: "no timer running\n" + todayLine}
 }
 
-func diaryStatus() string {
+func diaryStatus() cardStatus {
 	db, err := openDB("~/.local/share/diaryctl/diary.db")
 	if err != nil || db == nil {
-		return "–  not configured"
+		return cardStatus{text: "–  not configured"}
 	}
 	defer db.Close()
 
@@ -196,25 +223,25 @@ func diaryStatus() string {
 	_ = db.QueryRow(`SELECT date FROM entries ORDER BY date DESC LIMIT 1`).Scan(&lastDate)
 
 	if !lastDate.Valid || lastDate.String == "" {
-		return "no entries\nwrite your first one"
+		return cardStatus{text: "no entries\nwrite your first one", urgency: urgencyWarn}
 	}
 	t, err := time.Parse("2006-01-02", lastDate.String[:10])
 	if err != nil {
-		return "no entries"
+		return cardStatus{text: "no entries"}
 	}
 	today := time.Now().Truncate(24 * time.Hour)
 	diff := today.Sub(t.Truncate(24 * time.Hour))
 	switch {
 	case diff < 24*time.Hour:
-		return "last entry: today\nyou're up to date"
+		return cardStatus{text: "last entry: today\nyou're up to date"}
 	case diff < 48*time.Hour:
-		return "last entry: yesterday\nno entry yet today"
+		return cardStatus{text: "last entry: yesterday\nno entry yet today", urgency: urgencyWarn}
 	default:
-		return fmt.Sprintf("last entry: %s\nno entry yet today", t.Format("Jan 02"))
+		return cardStatus{text: fmt.Sprintf("last entry: %s\nno entry yet today", t.Format("Jan 02")), urgency: urgencyWarn}
 	}
 }
 
-func budgetStatus(_ time.Time) string {
+func budgetStatus(_ time.Time) cardStatus {
 	var goals struct {
 		Alerts int `json:"alerts"`
 		Data   []struct {
@@ -230,9 +257,14 @@ func budgetStatus(_ time.Time) string {
 			}
 		}
 		if goals.Alerts > 0 {
-			return fmt.Sprintf("%d goal(s) over/near budget\n%s at %.0f%%", goals.Alerts, worst.Category, worst.Percent)
+			text := fmt.Sprintf("%d goal(s) over/near budget\n%s at %.0f%%", goals.Alerts, worst.Category, worst.Percent)
+			urgency := urgencyWarn
+			if worst.Percent >= 100 {
+				urgency = urgencyCritical
+			}
+			return cardStatus{text: text, urgency: urgency}
 		}
-		return fmt.Sprintf("%d goals on track\nhighest: %s at %.0f%%", len(goals.Data), worst.Category, worst.Percent)
+		return cardStatus{text: fmt.Sprintf("%d goals on track\nhighest: %s at %.0f%%", len(goals.Data), worst.Category, worst.Percent)}
 	}
 
 	var sum struct {
@@ -240,7 +272,7 @@ func budgetStatus(_ time.Time) string {
 		ByCategory map[string]float64 `json:"ByCategory"`
 	}
 	if !runToolJSON("budgetctl", []string{"summary", "--json"}, &sum) {
-		return "–  not configured"
+		return cardStatus{text: "–  not configured"}
 	}
 	summary := fmt.Sprintf("€%.0f spent this month", math.Abs(sum.Expenses))
 	topCat, topAmt, found := "", 0.0, false
@@ -253,12 +285,12 @@ func budgetStatus(_ time.Time) string {
 		if topCat == "" {
 			topCat = "(uncategorized)"
 		}
-		return fmt.Sprintf("%s\ntop: %s (€%.0f)", summary, topCat, topAmt)
+		return cardStatus{text: fmt.Sprintf("%s\ntop: %s (€%.0f)", summary, topCat, topAmt)}
 	}
-	return summary
+	return cardStatus{text: summary}
 }
 
-func habitStatus(_ time.Time) string {
+func habitStatus(_ time.Time) cardStatus {
 	var resp struct {
 		Done  int `json:"done"`
 		Total int `json:"total"`
@@ -268,33 +300,33 @@ func habitStatus(_ time.Time) string {
 		} `json:"data"`
 	}
 	if !runToolJSON("habctl", []string{"today", "--json"}, &resp) {
-		return "–  not configured"
+		return cardStatus{text: "–  not configured"}
 	}
 	if resp.Total == 0 {
-		return "no habits tracked"
+		return cardStatus{text: "no habits tracked"}
 	}
 	summary := fmt.Sprintf("%d/%d done today", resp.Done, resp.Total)
 	if resp.Done == resp.Total {
-		return summary + "\nall done! 🎉"
+		return cardStatus{text: summary + "\nall done! 🎉"}
 	}
 	for _, h := range resp.Data {
 		if !h.CheckedToday {
-			return summary + "\nnext: " + h.Name
+			return cardStatus{text: summary + "\nnext: " + h.Name}
 		}
 	}
-	return summary
+	return cardStatus{text: summary}
 }
 
-func noteStatus(now time.Time) string {
+func noteStatus(now time.Time) cardStatus {
 	db, err := openDB("~/.local/share/notectl/notes.db")
 	if err != nil || db == nil {
-		return "–  not configured"
+		return cardStatus{text: "–  not configured"}
 	}
 	defer db.Close()
 
 	var total int
 	if err := db.QueryRow(`SELECT COUNT(*) FROM notes`).Scan(&total); err != nil {
-		return "–  not configured"
+		return cardStatus{text: "–  not configured"}
 	}
 
 	today := now.Format("2006-01-02")
@@ -309,31 +341,31 @@ func noteStatus(now time.Time) string {
 	var lastTitle sql.NullString
 	_ = db.QueryRow(`SELECT title FROM notes ORDER BY mod_time DESC LIMIT 1`).Scan(&lastTitle)
 	if lastTitle.Valid && lastTitle.String != "" {
-		return summary + "\nlatest: " + lastTitle.String
+		return cardStatus{text: summary + "\nlatest: " + lastTitle.String}
 	}
-	return summary
+	return cardStatus{text: summary}
 }
 
-func mailStatus() string {
+func mailStatus() cardStatus {
 	db, err := openDB("~/Library/Application Support/mailctl/mailctl.db")
 	if err != nil || db == nil {
-		return "–  not configured"
+		return cardStatus{text: "–  not configured"}
 	}
 	defer db.Close()
 
 	var unread int
 	if err := db.QueryRow(`SELECT COUNT(*) FROM messages WHERE read = 0`).Scan(&unread); err != nil {
-		return "–  not configured"
+		return cardStatus{text: "–  not configured"}
 	}
 	if unread == 0 {
-		return "0 unread\ninbox clear"
+		return cardStatus{text: "0 unread\ninbox clear"}
 	}
 
 	var subject sql.NullString
 	_ = db.QueryRow(`SELECT subject FROM messages WHERE read = 0 ORDER BY date DESC LIMIT 1`).Scan(&subject)
 	summary := fmt.Sprintf("%d unread", unread)
 	if subject.Valid && subject.String != "" {
-		return summary + "\n" + subject.String
+		return cardStatus{text: summary + "\n" + subject.String}
 	}
-	return summary
+	return cardStatus{text: summary}
 }

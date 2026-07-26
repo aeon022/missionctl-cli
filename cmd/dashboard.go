@@ -12,23 +12,120 @@ import (
 )
 
 type dashboardCard struct {
-	key   string
-	icon  string
-	label string
-	tool  string // binary to launch on keypress; "" = no jump target
-	color lipgloss.Color
-	value func(now time.Time) string
+	key    string
+	icon   string
+	label  string
+	tool   string // binary to launch on keypress; "" = no jump target
+	color  lipgloss.Color
+	value  func(now time.Time) cardStatus
+	action func() (string, error) // "x" quick action; nil = none for this card
 }
 
 var dashboardCards = []dashboardCard{
-	{"1", "✓", "Tasks", "taskctl", lipgloss.Color("39"), func(_ time.Time) string { return taskStatus() }},
-	{"2", "📅", "Calendar", "calctl", lipgloss.Color("42"), calStatus},
-	{"3", "⏱", "Timer", "timectl", lipgloss.Color("221"), timerStatus},
-	{"4", "📔", "Diary", "diaryctl", lipgloss.Color("212"), func(_ time.Time) string { return diaryStatus() }},
-	{"5", "💰", "Budget", "budgetctl", lipgloss.Color("208"), budgetStatus},
-	{"6", "🔥", "Habits", "habctl", lipgloss.Color("203"), habitStatus},
-	{"7", "📝", "Notes", "notectl", lipgloss.Color("135"), noteStatus},
-	{"8", "✉", "Mail", "mailctl", lipgloss.Color("33"), func(_ time.Time) string { return mailStatus() }},
+	{"1", "✓", "Tasks", "taskctl", lipgloss.Color("39"), func(_ time.Time) cardStatus { return taskStatus() }, quickCompleteTask},
+	{"2", "📅", "Calendar", "calctl", lipgloss.Color("42"), calStatus, nil},
+	{"3", "⏱", "Timer", "timectl", lipgloss.Color("221"), timerStatus, quickStopTimer},
+	{"4", "📔", "Diary", "diaryctl", lipgloss.Color("212"), func(_ time.Time) cardStatus { return diaryStatus() }, nil},
+	{"5", "💰", "Budget", "budgetctl", lipgloss.Color("208"), budgetStatus, nil},
+	{"6", "🔥", "Habits", "habctl", lipgloss.Color("203"), habitStatus, quickCheckHabit},
+	{"7", "📝", "Notes", "notectl", lipgloss.Color("135"), noteStatus, nil},
+	{"8", "✉", "Mail", "mailctl", lipgloss.Color("33"), func(_ time.Time) cardStatus { return mailStatus() }, nil},
+}
+
+// quickCompleteTask/quickCheckHabit/quickStopTimer re-fetch the same --json
+// data their card's status function already showed, act on the first
+// actionable item, and shell out to the tool's own write command — no new
+// data path, just acting on what's already on screen instead of requiring
+// a trip into the full tool for a one-line action.
+
+func quickCompleteTask() (string, error) {
+	var resp struct {
+		Data []struct {
+			Title string `json:"title"`
+			List  string `json:"list"`
+		} `json:"data"`
+	}
+	if !runToolJSON("taskctl", []string{"today", "--json"}, &resp) || len(resp.Data) == 0 {
+		return "", fmt.Errorf("no due task to complete")
+	}
+	t := resp.Data[0]
+	args := []string{"done", t.Title}
+	if t.List != "" {
+		args = append(args, "--list", t.List)
+	}
+	if out, err := exec.Command("taskctl", args...).CombinedOutput(); err != nil {
+		return "", fmt.Errorf("%s", strings.TrimSpace(string(out)))
+	}
+	return "completed: " + t.Title, nil
+}
+
+func quickCheckHabit() (string, error) {
+	var resp struct {
+		Data []struct {
+			Name         string `json:"name"`
+			CheckedToday bool   `json:"checked_today"`
+		} `json:"data"`
+	}
+	if !runToolJSON("habctl", []string{"today", "--json"}, &resp) {
+		return "", fmt.Errorf("habctl not available")
+	}
+	for _, h := range resp.Data {
+		if h.CheckedToday {
+			continue
+		}
+		if out, err := exec.Command("habctl", "check", h.Name).CombinedOutput(); err != nil {
+			return "", fmt.Errorf("%s", strings.TrimSpace(string(out)))
+		}
+		return "checked: " + h.Name, nil
+	}
+	return "", fmt.Errorf("all habits already done today")
+}
+
+func quickStopTimer() (string, error) {
+	var resp struct {
+		Entries []struct {
+			Running bool `json:"running"`
+		} `json:"entries"`
+	}
+	if !runToolJSON("timectl", []string{"today", "--json"}, &resp) {
+		return "", fmt.Errorf("timectl not available")
+	}
+	running := false
+	for _, e := range resp.Entries {
+		if e.Running {
+			running = true
+		}
+	}
+	if !running {
+		return "", fmt.Errorf("no timer running")
+	}
+	if out, err := exec.Command("timectl", "stop").CombinedOutput(); err != nil {
+		return "", fmt.Errorf("%s", strings.TrimSpace(string(out)))
+	}
+	return "timer stopped", nil
+}
+
+// syncableTools are the ones that pull from an external source (Apple
+// Reminders/Calendar/Mail, an Obsidian vault) and so actually have a
+// `sync` subcommand. The other 4 (timectl, budgetctl, habctl, diaryctl)
+// are locally-authored — their database already is the source of truth,
+// there's nothing external to pull from — so they're not in this list.
+var syncableTools = []string{"taskctl", "calctl", "notectl", "mailctl"}
+
+// syncAllTools runs each syncable tool's own `sync` sequentially — reuses
+// the same action-result plumbing as a card's "x" quick action, since both
+// are "run something external, show what happened" one-shots.
+func syncAllTools() (string, error) {
+	var failed []string
+	for _, t := range syncableTools {
+		if err := exec.Command(t, "sync").Run(); err != nil {
+			failed = append(failed, t)
+		}
+	}
+	if len(failed) > 0 {
+		return "", fmt.Errorf("failed: %s", strings.Join(failed, ", "))
+	}
+	return "synced " + strings.Join(syncableTools, ", "), nil
 }
 
 // Icons are plain Unicode emoji (not Nerd Font glyphs) so they render
@@ -36,14 +133,37 @@ var dashboardCards = []dashboardCard{
 
 type tickMsg time.Time
 
+// urgencyLevel lets a card override its normally-fixed border color to
+// flag something that actually needs attention (overdue tasks, a budget
+// goal blown) instead of every card always looking equally calm.
+type urgencyLevel int
+
+const (
+	urgencyNormal urgencyLevel = iota
+	urgencyWarn
+	urgencyCritical
+)
+
+// cardStatus is what a card's value function returns: the same
+// "summary\ndetail" text as before, plus how urgent it is. Bundled
+// together (rather than a second parallel function) so computing urgency
+// never requires re-fetching the same --json data status text already
+// fetched once per refresh.
+type cardStatus struct {
+	text    string
+	urgency urgencyLevel
+}
+
 type dashboardModel struct {
 	cursor      int
 	err         error
 	width       int
 	height      int
-	values      [8]string
+	values      [8]cardStatus
 	lastRefresh time.Time
 	now         time.Time
+	actionMsg   string // result of the last "x" quick action, cleared on next action/refresh
+	actionBusy  bool
 }
 
 func newDashboardModel() dashboardModel {
@@ -110,6 +230,21 @@ func (m dashboardModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		case "enter":
 			return m, m.launch(dashboardCards[m.cursor].tool)
+		case "x":
+			card := dashboardCards[m.cursor]
+			if card.action == nil || m.actionBusy {
+				return m, nil
+			}
+			m.actionBusy = true
+			m.actionMsg = ""
+			return m, runQuickAction(card.action)
+		case "s":
+			if m.actionBusy {
+				return m, nil
+			}
+			m.actionBusy = true
+			m.actionMsg = ""
+			return m, runQuickAction(syncAllTools)
 		}
 		for i, c := range dashboardCards {
 			if msg.String() == c.key {
@@ -122,8 +257,30 @@ func (m dashboardModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.err = msg.err
 		m.refresh()
 		return m, nil
+
+	case quickActionMsg:
+		m.actionBusy = false
+		if msg.err != nil {
+			m.actionMsg = "✗ " + msg.err.Error()
+		} else {
+			m.actionMsg = "✓ " + msg.result
+			m.refresh()
+		}
+		return m, nil
 	}
 	return m, nil
+}
+
+type quickActionMsg struct {
+	result string
+	err    error
+}
+
+func runQuickAction(action func() (string, error)) tea.Cmd {
+	return func() tea.Msg {
+		result, err := action()
+		return quickActionMsg{result: result, err: err}
+	}
 }
 
 type launchErrMsg struct{ err error }
@@ -145,11 +302,13 @@ func (m dashboardModel) launch(tool string) tea.Cmd {
 }
 
 var (
-	dashBg       = lipgloss.Color("235")
-	dashFg       = lipgloss.Color("255")
-	dashMuted    = lipgloss.Color("245")
-	dashSubtle   = lipgloss.Color("240")
-	dashErrColor = lipgloss.Color("203")
+	dashBg            = lipgloss.Color("235")
+	dashFg            = lipgloss.Color("255")
+	dashMuted         = lipgloss.Color("245")
+	dashSubtle        = lipgloss.Color("240")
+	dashErrColor      = lipgloss.Color("203")
+	dashWarnColor     = lipgloss.Color("214")
+	dashCriticalColor = lipgloss.Color("203")
 
 	dashTitleStyle = lipgloss.NewStyle().
 			Bold(true).
@@ -163,6 +322,8 @@ var (
 	dashFootStyle    = lipgloss.NewStyle().Foreground(dashSubtle)
 	dashKeyStyle     = lipgloss.NewStyle().Foreground(dashFg).Bold(true)
 	dashErrStyle     = lipgloss.NewStyle().Foreground(dashErrColor).Bold(true)
+	dashOKStyle      = lipgloss.NewStyle().Foreground(lipgloss.Color("42")).Bold(true)
+	dashMutedStyle   = lipgloss.NewStyle().Foreground(dashMuted)
 )
 
 const (
@@ -188,9 +349,17 @@ func (m dashboardModel) renderCard(i int) string {
 	w := m.cardWidth()
 	selected := i == m.cursor
 
+	cardColor := c.color
+	switch m.values[i].urgency {
+	case urgencyCritical:
+		cardColor = dashCriticalColor
+	case urgencyWarn:
+		cardColor = dashWarnColor
+	}
+
 	border := lipgloss.RoundedBorder()
-	borderColor := c.color
-	titleStyle := lipgloss.NewStyle().Bold(true).Foreground(c.color)
+	borderColor := cardColor
+	titleStyle := lipgloss.NewStyle().Bold(true).Foreground(cardColor)
 	if selected {
 		border = lipgloss.ThickBorder()
 		titleStyle = titleStyle.Underline(true)
@@ -213,7 +382,7 @@ func (m dashboardModel) renderCard(i int) string {
 	// alongside the one-line counts already there. Styled dimmer than the
 	// summary so the at-a-glance number stays the visual anchor.
 	value := m.values[i]
-	summaryLine, detailLine, _ := strings.Cut(value, "\n")
+	summaryLine, detailLine, _ := strings.Cut(value.text, "\n")
 
 	summaryStyle := lipgloss.NewStyle().Foreground(dashFg).Width(w - 2)
 	if summaryLine == "" || strings.HasPrefix(summaryLine, "–") {
@@ -228,6 +397,11 @@ func (m dashboardModel) renderCard(i int) string {
 		valueBlock += "\n" + detailStyle.Render(truncate(detailLine, w-2))
 	} else {
 		valueBlock += "\n"
+	}
+
+	if age := syncAge(c.tool); age != "" {
+		ageStyle := lipgloss.NewStyle().Foreground(dashSubtle).Width(w - 2)
+		valueBlock += "\n" + ageStyle.Render(truncate("synced "+age, w-2))
 	}
 
 	body := headLine + "\n" + valueBlock
@@ -312,13 +486,27 @@ func (m dashboardModel) View() string {
 	if m.err != nil {
 		b.WriteString(rowIndent + dashErrStyle.Render("⚠ last launch failed: "+m.err.Error()) + "\n")
 	}
+	if m.actionBusy {
+		b.WriteString(rowIndent + dashMutedStyle.Render("running…") + "\n")
+	} else if m.actionMsg != "" {
+		style := dashOKStyle
+		if strings.HasPrefix(m.actionMsg, "✗") {
+			style = dashErrStyle
+		}
+		b.WriteString(rowIndent + style.Render(m.actionMsg) + "\n")
+	}
 
+	xHint := ""
+	if dashboardCards[m.cursor].action != nil {
+		xHint = fmt.Sprintf("  %s quick action", dashKeyStyle.Render("x"))
+	}
 	footer := fmt.Sprintf(
-		"%s/%s row  %s/%s column  %s or number jump in  %s refresh  %s quit",
+		"%s/%s row  %s/%s column  %s or number jump in%s  %s refresh  %s sync all  %s quit",
 		dashKeyStyle.Render("↑"), dashKeyStyle.Render("↓"),
 		dashKeyStyle.Render("←"), dashKeyStyle.Render("→"),
-		dashKeyStyle.Render("enter"),
+		dashKeyStyle.Render("enter"), xHint,
 		dashKeyStyle.Render("r"),
+		dashKeyStyle.Render("s"),
 		dashKeyStyle.Render("q"),
 	)
 	b.WriteString(rowIndent + dashFootStyle.Render(footer) + "\n")
