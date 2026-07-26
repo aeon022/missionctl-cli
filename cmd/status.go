@@ -2,16 +2,39 @@ package cmd
 
 import (
 	"database/sql"
+	"encoding/json"
 	"fmt"
+	"math"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"time"
 
 	"github.com/charmbracelet/lipgloss"
-	_ "modernc.org/sqlite"
 	"github.com/spf13/cobra"
+	_ "modernc.org/sqlite"
 )
+
+// runToolJSON shells out to a sibling tool's own CLI and decodes its JSON
+// output into v. Every status function used to read that tool's SQLite
+// database directly with hand-rolled SQL — several of those paths and
+// column names had drifted from the tools' actual current schemas (found
+// while fixing this: taskctl and calctl's DB paths were wrong, diaryctl's
+// query referenced a "streaks" table and an "entry_date" column that don't
+// exist), so the cards were silently showing "not configured" or 0 for
+// tools that actually had data. Going through each tool's own --json
+// output instead means the data layer can't drift out of sync with a
+// schema change the way raw cross-repo SQL can. Returns false (not an
+// error) if the tool isn't installed or the call fails, so a card
+// degrades to "not configured" instead of erroring the whole dashboard.
+func runToolJSON(bin string, args []string, v any) bool {
+	out, err := exec.Command(bin, args...).Output()
+	if err != nil {
+		return false
+	}
+	return json.Unmarshal(out, v) == nil
+}
 
 var statusCmd = &cobra.Command{
 	Use:   "status",
@@ -93,98 +116,65 @@ func runStatus(_ *cobra.Command, _ []string) error {
 }
 
 func taskStatus() string {
-	db, err := openDB("~/.local/share/taskctl/tasks.db")
-	if err != nil || db == nil {
+	var resp struct {
+		Overdue  int `json:"overdue"`
+		DueToday int `json:"due_today"`
+	}
+	if !runToolJSON("taskctl", []string{"today", "--json"}, &resp) {
 		return "–  not configured"
 	}
-	defer db.Close()
-
-	var open int
-	if err := db.QueryRow(`SELECT COUNT(*) FROM tasks WHERE status='needsAction'`).Scan(&open); err != nil {
-		return "–  not configured"
+	if resp.Overdue == 0 && resp.DueToday == 0 {
+		return "nothing due today"
 	}
-
-	today := time.Now().Format("2006-01-02")
-	var dueToday int
-	// due date may be stored as ISO string; attempt both date-only and datetime prefix
-	row := db.QueryRow(`SELECT COUNT(*) FROM tasks WHERE status='needsAction' AND (due = ? OR due LIKE ?)`, today, today+"%")
-	_ = row.Scan(&dueToday)
-
-	return fmt.Sprintf("%d open · %d due today", open, dueToday)
+	var parts []string
+	if resp.DueToday > 0 {
+		parts = append(parts, fmt.Sprintf("%d due today", resp.DueToday))
+	}
+	if resp.Overdue > 0 {
+		parts = append(parts, fmt.Sprintf("%d overdue", resp.Overdue))
+	}
+	return strings.Join(parts, " · ")
 }
 
 func calStatus(now time.Time) string {
-	db, err := openDB("~/.local/share/calctl/cal.db")
-	if err != nil || db == nil {
+	var resp struct {
+		Count int `json:"count"`
+		Data  []struct {
+			Title     string    `json:"title"`
+			StartTime time.Time `json:"start_time"`
+		} `json:"data"`
+	}
+	if !runToolJSON("calctl", []string{"list", "--today", "--format", "json"}, &resp) {
 		return "–  not configured"
 	}
-	defer db.Close()
-
-	today := now.Format("2006-01-02")
-
-	var count int
-	if err := db.QueryRow(
-		`SELECT COUNT(*) FROM events WHERE start LIKE ?`, today+"%",
-	).Scan(&count); err != nil {
-		return "–  not configured"
+	if resp.Count == 0 {
+		return "no events today"
 	}
-
-	// Find the next event from now
-	nowStr := now.Format("2006-01-02T15:04")
-	var nextSummary, nextStart string
-	row := db.QueryRow(
-		`SELECT summary, start FROM events WHERE start >= ? ORDER BY start ASC LIMIT 1`, nowStr,
-	)
-	if err := row.Scan(&nextSummary, &nextStart); err == nil && nextSummary != "" {
-		// Parse time for display
-		t, perr := time.Parse("2006-01-02T15:04:05Z07:00", nextStart)
-		if perr != nil {
-			t, perr = time.Parse("2006-01-02T15:04:05", nextStart)
+	for _, e := range resp.Data {
+		if e.StartTime.After(now) {
+			return fmt.Sprintf("%d events today · next: %s at %s", resp.Count, e.Title, e.StartTime.Format("15:04"))
 		}
-		if perr == nil {
-			return fmt.Sprintf("%d events today · next: %s at %s", count, nextSummary, t.Format("15:04"))
-		}
-		return fmt.Sprintf("%d events today · next: %s", count, nextSummary)
 	}
-
-	return fmt.Sprintf("%d events today", count)
+	return fmt.Sprintf("%d events today", resp.Count)
 }
 
-func timerStatus(now time.Time) string {
-	db, err := openDB("~/.local/share/timectl/time.db")
-	if err != nil || db == nil {
+func timerStatus(_ time.Time) string {
+	var resp struct {
+		TotalHuman string `json:"total_human"`
+		Entries    []struct {
+			Task    string `json:"task"`
+			Running bool   `json:"running"`
+		} `json:"entries"`
+	}
+	if !runToolJSON("timectl", []string{"today", "--json"}, &resp) {
 		return "–  not configured"
 	}
-	defer db.Close()
-
-	// Check for running timer (end IS NULL)
-	var runningDesc sql.NullString
-	_ = db.QueryRow(`SELECT description FROM entries WHERE end IS NULL ORDER BY start DESC LIMIT 1`).Scan(&runningDesc)
-
-	today := now.Format("2006-01-02")
-
-	// Sum of completed entries today (in seconds)
-	var totalSecs sql.NullFloat64
-	_ = db.QueryRow(
-		`SELECT SUM((julianday(end) - julianday(start)) * 86400)
-		 FROM entries
-		 WHERE start LIKE ? AND end IS NOT NULL`, today+"%",
-	).Scan(&totalSecs)
-
-	hours := 0
-	mins := 0
-	if totalSecs.Valid && totalSecs.Float64 > 0 {
-		secs := int(totalSecs.Float64)
-		hours = secs / 3600
-		mins = (secs % 3600) / 60
+	for _, e := range resp.Entries {
+		if e.Running {
+			return fmt.Sprintf("running: %s · %s today", e.Task, resp.TotalHuman)
+		}
 	}
-
-	todayStr := fmt.Sprintf("%dh %02dm today", hours, mins)
-
-	if runningDesc.Valid && runningDesc.String != "" {
-		return fmt.Sprintf("running: %s · %s", runningDesc.String, todayStr)
-	}
-	return fmt.Sprintf("no timer running · %s", todayStr)
+	return fmt.Sprintf("no timer running · %s today", resp.TotalHuman)
 }
 
 func diaryStatus() string {
@@ -194,82 +184,68 @@ func diaryStatus() string {
 	}
 	defer db.Close()
 
-	// Try to get streak from streaks table
-	var streak sql.NullInt64
-	_ = db.QueryRow(`SELECT current_streak FROM streaks ORDER BY rowid DESC LIMIT 1`).Scan(&streak)
-
-	// Last entry date
+	// Last entry date. There is no streaks table in diaryctl's schema — an
+	// earlier version of this query referenced one, plus an "entry_date"
+	// column that doesn't exist either (the real column is "date"); both
+	// silently failed via a swallowed Scan error and always reported
+	// "streak: 0 days", regardless of actual data.
 	var lastDate sql.NullString
-	_ = db.QueryRow(`SELECT entry_date FROM entries ORDER BY entry_date DESC LIMIT 1`).Scan(&lastDate)
+	_ = db.QueryRow(`SELECT date FROM entries ORDER BY date DESC LIMIT 1`).Scan(&lastDate)
 
-	streakStr := "streak: 0 days"
-	if streak.Valid {
-		streakStr = fmt.Sprintf("streak: %d days", streak.Int64)
+	if !lastDate.Valid || lastDate.String == "" {
+		return "no entries"
 	}
+	t, err := time.Parse("2006-01-02", lastDate.String[:10])
+	if err != nil {
+		return "no entries"
+	}
+	today := time.Now().Truncate(24 * time.Hour)
+	diff := today.Sub(t.Truncate(24 * time.Hour))
+	switch {
+	case diff < 24*time.Hour:
+		return "last entry: today"
+	case diff < 48*time.Hour:
+		return "last entry: yesterday"
+	default:
+		return fmt.Sprintf("last entry: %s", t.Format("Jan 02"))
+	}
+}
 
-	lastStr := "no entries"
-	if lastDate.Valid && lastDate.String != "" {
-		t, err := time.Parse("2006-01-02", lastDate.String[:10])
-		if err == nil {
-			today := time.Now().Truncate(24 * time.Hour)
-			diff := today.Sub(t.Truncate(24 * time.Hour))
-			switch {
-			case diff < 24*time.Hour:
-				lastStr = "last entry: today"
-			case diff < 48*time.Hour:
-				lastStr = "last entry: yesterday"
-			default:
-				lastStr = fmt.Sprintf("last entry: %s", t.Format("Jan 02"))
-			}
+func budgetStatus(_ time.Time) string {
+	var goals struct {
+		Alerts int `json:"alerts"`
+		Data   []struct {
+			Category string `json:"Category"`
+		} `json:"data"`
+	}
+	if runToolJSON("budgetctl", []string{"goal", "list", "--json"}, &goals) && len(goals.Data) > 0 {
+		if goals.Alerts > 0 {
+			return fmt.Sprintf("%d goal(s) over/near budget", goals.Alerts)
 		}
+		return fmt.Sprintf("%d goals on track", len(goals.Data))
 	}
 
-	return fmt.Sprintf("%s · %s", streakStr, lastStr)
+	var sum struct {
+		Expenses float64 `json:"Expenses"`
+	}
+	if !runToolJSON("budgetctl", []string{"summary", "--json"}, &sum) {
+		return "–  not configured"
+	}
+	return fmt.Sprintf("€%.0f spent this month", math.Abs(sum.Expenses))
 }
 
-func budgetStatus(now time.Time) string {
-	db, err := openDB("~/.local/share/budgetctl/budget.db")
-	if err != nil || db == nil {
+func habitStatus(_ time.Time) string {
+	var resp struct {
+		Done  int `json:"done"`
+		Total int `json:"total"`
+	}
+	if !runToolJSON("habctl", []string{"today", "--json"}, &resp) {
 		return "–  not configured"
 	}
-	defer db.Close()
-
-	month := now.Format("2006-01")
-
-	var total sql.NullFloat64
-	_ = db.QueryRow(
-		`SELECT SUM(amount) FROM transactions WHERE date LIKE ? AND amount > 0`, month+"%",
-	).Scan(&total)
-
-	if !total.Valid || total.Float64 == 0 {
-		return "€0 spent this month"
-	}
-
-	return fmt.Sprintf("€%.0f spent this month", total.Float64)
-}
-
-func habitStatus(now time.Time) string {
-	db, err := openDB("~/.local/share/habctl/habits.db")
-	if err != nil || db == nil {
-		return "–  not configured"
-	}
-	defer db.Close()
-
-	var total int
-	if err := db.QueryRow(`SELECT COUNT(*) FROM habits WHERE archived = 0`).Scan(&total); err != nil {
-		return "–  not configured"
-	}
-
-	today := now.Format("2006-01-02")
-	var doneToday int
-	_ = db.QueryRow(
-		`SELECT COUNT(DISTINCT habit_id) FROM checkins WHERE date = ?`, today,
-	).Scan(&doneToday)
-
-	if total == 0 {
+	if resp.Total == 0 {
 		return "no habits tracked"
 	}
-	return fmt.Sprintf("%d/%d done today", doneToday, total)
+	return fmt.Sprintf("%d/%d done today", resp.Done, resp.Total)
 }
 
 func noteStatus(now time.Time) string {
