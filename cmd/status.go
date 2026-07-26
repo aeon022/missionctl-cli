@@ -68,50 +68,38 @@ func openDB(path string) (*sql.DB, error) {
 func runStatus(_ *cobra.Command, _ []string) error {
 	headerStyle := lipgloss.NewStyle().Bold(true)
 	labelStyle := lipgloss.NewStyle().Width(12)
-	dashStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("8"))
+	detailStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("8"))
 
 	now := time.Now()
 	dateStr := now.Format("Mon Jan 02")
+
+	// printStatus splits a status value on its optional detail line(s) and
+	// indents continuations under the value column (not the label column),
+	// so a card's extra detail line — added so the same data reads well in
+	// both this plain view and the dashboard's boxes — doesn't run on
+	// looking like part of the summary or drift under the wrong column.
+	printStatus := func(label, value string) {
+		lines := strings.Split(value, "\n")
+		fmt.Printf("  %s %s\n", labelStyle.Render(label), lines[0])
+		for _, l := range lines[1:] {
+			fmt.Printf("  %s %s\n", labelStyle.Render(""), detailStyle.Render(l))
+		}
+	}
 
 	fmt.Println()
 	fmt.Printf("  %s\n", headerStyle.Render(fmt.Sprintf("missionctl status — %s", dateStr)))
 	fmt.Println()
 
-	// Tasks
-	taskLine := taskStatus()
-	fmt.Printf("  %s %s\n", labelStyle.Render("Tasks"), taskLine)
-
-	// Calendar
-	calLine := calStatus(now)
-	fmt.Printf("  %s %s\n", labelStyle.Render("Calendar"), calLine)
-
-	// Timer
-	timerLine := timerStatus(now)
-	fmt.Printf("  %s %s\n", labelStyle.Render("Timer"), timerLine)
-
-	// Diary
-	diaryLine := diaryStatus()
-	fmt.Printf("  %s %s\n", labelStyle.Render("Diary"), diaryLine)
-
-	// Budget
-	budgetLine := budgetStatus(now)
-	fmt.Printf("  %s %s\n", labelStyle.Render("Budget"), budgetLine)
-
-	// Habits
-	habitLine := habitStatus(now)
-	fmt.Printf("  %s %s\n", labelStyle.Render("Habits"), habitLine)
-
-	// Notes
-	noteLine := noteStatus(now)
-	fmt.Printf("  %s %s\n", labelStyle.Render("Notes"), noteLine)
-
-	// Mail
-	mailLine := mailStatus()
-	fmt.Printf("  %s %s\n", labelStyle.Render("Mail"), mailLine)
+	printStatus("Tasks", taskStatus())
+	printStatus("Calendar", calStatus(now))
+	printStatus("Timer", timerStatus(now))
+	printStatus("Diary", diaryStatus())
+	printStatus("Budget", budgetStatus(now))
+	printStatus("Habits", habitStatus(now))
+	printStatus("Notes", noteStatus(now))
+	printStatus("Mail", mailStatus())
 
 	fmt.Println()
-
-	_ = dashStyle
 	return nil
 }
 
@@ -119,6 +107,10 @@ func taskStatus() string {
 	var resp struct {
 		Overdue  int `json:"overdue"`
 		DueToday int `json:"due_today"`
+		Data     []struct {
+			Title   string     `json:"title"`
+			DueDate *time.Time `json:"due_date"`
+		} `json:"data"`
 	}
 	if !runToolJSON("taskctl", []string{"today", "--json"}, &resp) {
 		return "–  not configured"
@@ -133,7 +125,11 @@ func taskStatus() string {
 	if resp.Overdue > 0 {
 		parts = append(parts, fmt.Sprintf("%d overdue", resp.Overdue))
 	}
-	return strings.Join(parts, " · ")
+	summary := strings.Join(parts, " · ")
+	if len(resp.Data) == 0 {
+		return summary
+	}
+	return summary + "\n" + resp.Data[0].Title
 }
 
 func calStatus(now time.Time) string {
@@ -150,12 +146,13 @@ func calStatus(now time.Time) string {
 	if resp.Count == 0 {
 		return "no events today"
 	}
+	summary := fmt.Sprintf("%d events today", resp.Count)
 	for _, e := range resp.Data {
 		if e.StartTime.After(now) {
-			return fmt.Sprintf("%d events today · next: %s at %s", resp.Count, e.Title, e.StartTime.Format("15:04"))
+			return fmt.Sprintf("%s\nnext: %s at %s", summary, e.Title, e.StartTime.Format("15:04"))
 		}
 	}
-	return fmt.Sprintf("%d events today", resp.Count)
+	return summary
 }
 
 func timerStatus(_ time.Time) string {
@@ -163,18 +160,24 @@ func timerStatus(_ time.Time) string {
 		TotalHuman string `json:"total_human"`
 		Entries    []struct {
 			Task    string `json:"task"`
+			Project string `json:"project"`
 			Running bool   `json:"running"`
 		} `json:"entries"`
 	}
 	if !runToolJSON("timectl", []string{"today", "--json"}, &resp) {
 		return "–  not configured"
 	}
+	todayLine := fmt.Sprintf("%s today", resp.TotalHuman)
 	for _, e := range resp.Entries {
 		if e.Running {
-			return fmt.Sprintf("running: %s · %s today", e.Task, resp.TotalHuman)
+			task := e.Task
+			if e.Project != "" {
+				task = fmt.Sprintf("%s (%s)", e.Task, e.Project)
+			}
+			return "running: " + task + "\n" + todayLine
 		}
 	}
-	return fmt.Sprintf("no timer running · %s today", resp.TotalHuman)
+	return "no timer running\n" + todayLine
 }
 
 func diaryStatus() string {
@@ -193,7 +196,7 @@ func diaryStatus() string {
 	_ = db.QueryRow(`SELECT date FROM entries ORDER BY date DESC LIMIT 1`).Scan(&lastDate)
 
 	if !lastDate.Valid || lastDate.String == "" {
-		return "no entries"
+		return "no entries\nwrite your first one"
 	}
 	t, err := time.Parse("2006-01-02", lastDate.String[:10])
 	if err != nil {
@@ -203,11 +206,11 @@ func diaryStatus() string {
 	diff := today.Sub(t.Truncate(24 * time.Hour))
 	switch {
 	case diff < 24*time.Hour:
-		return "last entry: today"
+		return "last entry: today\nyou're up to date"
 	case diff < 48*time.Hour:
-		return "last entry: yesterday"
+		return "last entry: yesterday\nno entry yet today"
 	default:
-		return fmt.Sprintf("last entry: %s", t.Format("Jan 02"))
+		return fmt.Sprintf("last entry: %s\nno entry yet today", t.Format("Jan 02"))
 	}
 }
 
@@ -215,29 +218,54 @@ func budgetStatus(_ time.Time) string {
 	var goals struct {
 		Alerts int `json:"alerts"`
 		Data   []struct {
-			Category string `json:"Category"`
+			Category string  `json:"Category"`
+			Percent  float64 `json:"Percent"`
 		} `json:"data"`
 	}
 	if runToolJSON("budgetctl", []string{"goal", "list", "--json"}, &goals) && len(goals.Data) > 0 {
-		if goals.Alerts > 0 {
-			return fmt.Sprintf("%d goal(s) over/near budget", goals.Alerts)
+		worst := goals.Data[0]
+		for _, g := range goals.Data {
+			if g.Percent > worst.Percent {
+				worst = g
+			}
 		}
-		return fmt.Sprintf("%d goals on track", len(goals.Data))
+		if goals.Alerts > 0 {
+			return fmt.Sprintf("%d goal(s) over/near budget\n%s at %.0f%%", goals.Alerts, worst.Category, worst.Percent)
+		}
+		return fmt.Sprintf("%d goals on track\nhighest: %s at %.0f%%", len(goals.Data), worst.Category, worst.Percent)
 	}
 
 	var sum struct {
-		Expenses float64 `json:"Expenses"`
+		Expenses   float64            `json:"Expenses"`
+		ByCategory map[string]float64 `json:"ByCategory"`
 	}
 	if !runToolJSON("budgetctl", []string{"summary", "--json"}, &sum) {
 		return "–  not configured"
 	}
-	return fmt.Sprintf("€%.0f spent this month", math.Abs(sum.Expenses))
+	summary := fmt.Sprintf("€%.0f spent this month", math.Abs(sum.Expenses))
+	topCat, topAmt, found := "", 0.0, false
+	for cat, amt := range sum.ByCategory {
+		if a := math.Abs(amt); a > topAmt || !found {
+			topCat, topAmt, found = cat, a, true
+		}
+	}
+	if found {
+		if topCat == "" {
+			topCat = "(uncategorized)"
+		}
+		return fmt.Sprintf("%s\ntop: %s (€%.0f)", summary, topCat, topAmt)
+	}
+	return summary
 }
 
 func habitStatus(_ time.Time) string {
 	var resp struct {
 		Done  int `json:"done"`
 		Total int `json:"total"`
+		Data  []struct {
+			Name         string `json:"name"`
+			CheckedToday bool   `json:"checked_today"`
+		} `json:"data"`
 	}
 	if !runToolJSON("habctl", []string{"today", "--json"}, &resp) {
 		return "–  not configured"
@@ -245,7 +273,16 @@ func habitStatus(_ time.Time) string {
 	if resp.Total == 0 {
 		return "no habits tracked"
 	}
-	return fmt.Sprintf("%d/%d done today", resp.Done, resp.Total)
+	summary := fmt.Sprintf("%d/%d done today", resp.Done, resp.Total)
+	if resp.Done == resp.Total {
+		return summary + "\nall done! 🎉"
+	}
+	for _, h := range resp.Data {
+		if !h.CheckedToday {
+			return summary + "\nnext: " + h.Name
+		}
+	}
+	return summary
 }
 
 func noteStatus(now time.Time) string {
@@ -264,10 +301,17 @@ func noteStatus(now time.Time) string {
 	var createdToday int
 	_ = db.QueryRow(`SELECT COUNT(*) FROM notes WHERE created LIKE ?`, today+"%").Scan(&createdToday)
 
+	summary := fmt.Sprintf("%d notes", total)
 	if createdToday > 0 {
-		return fmt.Sprintf("%d notes · %d created today", total, createdToday)
+		summary = fmt.Sprintf("%s · %d created today", summary, createdToday)
 	}
-	return fmt.Sprintf("%d notes", total)
+
+	var lastTitle sql.NullString
+	_ = db.QueryRow(`SELECT title FROM notes ORDER BY mod_time DESC LIMIT 1`).Scan(&lastTitle)
+	if lastTitle.Valid && lastTitle.String != "" {
+		return summary + "\nlatest: " + lastTitle.String
+	}
+	return summary
 }
 
 func mailStatus() string {
@@ -281,6 +325,15 @@ func mailStatus() string {
 	if err := db.QueryRow(`SELECT COUNT(*) FROM messages WHERE read = 0`).Scan(&unread); err != nil {
 		return "–  not configured"
 	}
+	if unread == 0 {
+		return "0 unread\ninbox clear"
+	}
 
-	return fmt.Sprintf("%d unread", unread)
+	var subject sql.NullString
+	_ = db.QueryRow(`SELECT subject FROM messages WHERE read = 0 ORDER BY date DESC LIMIT 1`).Scan(&subject)
+	summary := fmt.Sprintf("%d unread", unread)
+	if subject.Valid && subject.String != "" {
+		return summary + "\n" + subject.String
+	}
+	return summary
 }

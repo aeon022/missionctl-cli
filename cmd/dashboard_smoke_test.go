@@ -5,7 +5,23 @@ import (
 	"testing"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/lipgloss"
 )
+
+func TestTruncateRespectsDisplayWidthNotRuneCount(t *testing.T) {
+	// Regression test: a wide character (emoji) inflates display width
+	// without adding many runes. The old truncate() checked rune count as
+	// a second bailout after the width check failed, so a short-in-runes
+	// but wide-on-screen string slipped through untruncated — found via a
+	// note title with an emoji making its dashboard card overflow its
+	// fixed width and wrap onto an extra line, misaligning that row.
+	s := "👶 Baby-Checkliste — Geburt ca. 28.12.2026 (Graz)"
+	max := 20
+	out := truncate(s, max)
+	if w := lipgloss.Width(out); w > max {
+		t.Errorf("truncate(%q, %d) = %q, want display width <= %d, got %d", s, max, out, max, w)
+	}
+}
 
 func TestDashboardViewRenders(t *testing.T) {
 	m := newDashboardModel()

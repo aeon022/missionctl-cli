@@ -208,13 +208,29 @@ func (m dashboardModel) renderCard(i int) string {
 	}
 	headLine = head + strings.Repeat(" ", pad) + keyBadge
 
+	// Status values are "summary\ndetail" — a second line of specifics (the
+	// actual overdue task's title, the next event, who's over budget) added
+	// alongside the one-line counts already there. Styled dimmer than the
+	// summary so the at-a-glance number stays the visual anchor.
 	value := m.values[i]
-	valueStyle := lipgloss.NewStyle().Foreground(dashFg).Width(w - 2)
-	if value == "" || strings.HasPrefix(value, "–") {
-		valueStyle = valueStyle.Foreground(dashSubtle)
+	summaryLine, detailLine, _ := strings.Cut(value, "\n")
+
+	summaryStyle := lipgloss.NewStyle().Foreground(dashFg).Width(w - 2)
+	if summaryLine == "" || strings.HasPrefix(summaryLine, "–") {
+		summaryStyle = summaryStyle.Foreground(dashSubtle)
+	}
+	valueBlock := summaryStyle.Render(truncate(summaryLine, w-2))
+	// Always emit a second line (blank if there's no detail) so every card
+	// is the same height — cards without one used to make lipgloss.JoinHorizontal
+	// misalign that row's bottom borders against its taller row-mate.
+	if detailLine != "" {
+		detailStyle := lipgloss.NewStyle().Foreground(dashSubtle).Width(w - 2)
+		valueBlock += "\n" + detailStyle.Render(truncate(detailLine, w-2))
+	} else {
+		valueBlock += "\n"
 	}
 
-	body := headLine + "\n" + valueStyle.Render(truncate(value, (w-2)*2))
+	body := headLine + "\n" + valueBlock
 
 	box := lipgloss.NewStyle().
 		Border(border).
@@ -225,15 +241,22 @@ func (m dashboardModel) renderCard(i int) string {
 	return box.Render(body)
 }
 
+// truncate cuts s to at most max display columns, appending "…". Trims by
+// display width (lipgloss.Width), not rune count — a wide character (an
+// emoji, CJK) can make a string exceed max columns despite having fewer
+// runes than max, which a rune-count-only check would miss and return the
+// untruncated string, silently overflowing whatever fixed-width box it's
+// meant to fit (found via a note title with an emoji making its dashboard
+// card one line taller than its row-mates).
 func truncate(s string, max int) string {
 	if lipgloss.Width(s) <= max {
 		return s
 	}
 	r := []rune(s)
-	if len(r) <= max {
-		return s
+	for len(r) > 0 && lipgloss.Width(string(r))+1 > max {
+		r = r[:len(r)-1]
 	}
-	return string(r[:max-1]) + "…"
+	return string(r) + "…"
 }
 
 // renderHeader draws the full-width MISSIONCTL banner: badge + tagline on
