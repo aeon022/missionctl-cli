@@ -199,6 +199,15 @@ func (m dashboardModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.width, m.height = msg.Width, msg.Height
 		return m, nil
 
+	case tea.MouseMsg:
+		// The card grid always fits on screen — there's nothing to scroll.
+		// Without mouse capture enabled, a trackpad/wheel scroll gets
+		// translated by the terminal into arrow-key escapes instead, which
+		// used to jump the card cursor around unintentionally. Capturing
+		// mouse input turns that into a real MouseMsg here, which is simply
+		// swallowed — scroll no longer does anything, on purpose.
+		return m, nil
+
 	case tickMsg:
 		m.now = time.Time(msg)
 		if m.now.Sub(m.lastRefresh) >= 30*time.Second {
@@ -603,7 +612,7 @@ func (m dashboardModel) View() string {
 }
 
 func runDashboard(_ *cobra.Command, _ []string) error {
-	p := tea.NewProgram(newDashboardModel(), tea.WithAltScreen())
+	p := tea.NewProgram(newDashboardModel(), tea.WithAltScreen(), tea.WithMouseCellMotion())
 	_, err := p.Run()
 	return err
 }
