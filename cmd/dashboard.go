@@ -112,20 +112,27 @@ func quickStopTimer() (string, error) {
 // there's nothing external to pull from — so they're not in this list.
 var syncableTools = []string{"taskctl", "calctl", "notectl", "mailctl"}
 
-// syncAllTools runs each syncable tool's own `sync` sequentially — reuses
-// the same action-result plumbing as a card's "x" quick action, since both
-// are "run something external, show what happened" one-shots.
-func syncAllTools() (string, error) {
-	var failed []string
-	for _, t := range syncableTools {
-		if err := exec.Command(t, "sync").Run(); err != nil {
-			failed = append(failed, t)
-		}
+// syncStepMsg reports one syncableTools entry finishing. Sync-all used to
+// run every tool in one blocking call and just show "running…" the whole
+// time — mailctl alone routinely takes 45-90s (many individual AppleScript
+// round-trips per message, and slower still with no stdio attached, which
+// is exactly how exec.Command runs it here), so a user checking back after
+// 20-30s reasonably concluded it had silently failed. Now each tool's sync
+// runs as its own step so the status line can name which one is in flight.
+type syncStepMsg struct {
+	idx int // index into syncableTools that just finished
+	err error
+}
+
+func syncStepCmd(idx int) tea.Cmd {
+	return func() tea.Msg {
+		err := exec.Command(syncableTools[idx], "sync").Run()
+		return syncStepMsg{idx: idx, err: err}
 	}
-	if len(failed) > 0 {
-		return "", fmt.Errorf("failed: %s", strings.Join(failed, ", "))
-	}
-	return "synced " + strings.Join(syncableTools, ", "), nil
+}
+
+func syncStepLabel(idx int) string {
+	return fmt.Sprintf("syncing %s… (%d/%d)", syncableTools[idx], idx+1, len(syncableTools))
 }
 
 // Icons are plain Unicode emoji (not Nerd Font glyphs) so they render
@@ -164,6 +171,7 @@ type dashboardModel struct {
 	now         time.Time
 	actionMsg   string // result of the last "x" quick action, cleared on next action/refresh
 	actionBusy  bool
+	syncFailed  []string // syncableTools entries whose step errored, accumulated across a sync-all run
 
 	showAgenda   bool // "a" toggles between the card grid and the agenda view
 	agendaLoad   bool
@@ -274,8 +282,9 @@ func (m dashboardModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return m, nil
 			}
 			m.actionBusy = true
-			m.actionMsg = ""
-			return m, runQuickAction(syncAllTools)
+			m.syncFailed = nil
+			m.actionMsg = syncStepLabel(0)
+			return m, syncStepCmd(0)
 		}
 		if !m.showAgenda {
 			for i, c := range dashboardCards {
@@ -299,6 +308,24 @@ func (m dashboardModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.actionMsg = "✓ " + msg.result
 			m.refresh()
 		}
+		return m, nil
+
+	case syncStepMsg:
+		if msg.err != nil {
+			m.syncFailed = append(m.syncFailed, syncableTools[msg.idx])
+		}
+		next := msg.idx + 1
+		if next < len(syncableTools) {
+			m.actionMsg = syncStepLabel(next)
+			return m, syncStepCmd(next)
+		}
+		m.actionBusy = false
+		if len(m.syncFailed) > 0 {
+			m.actionMsg = "✗ failed: " + strings.Join(m.syncFailed, ", ")
+		} else {
+			m.actionMsg = "✓ synced " + strings.Join(syncableTools, ", ")
+		}
+		m.refresh()
 		return m, nil
 
 	case agendaLoadedMsg:
@@ -573,7 +600,11 @@ func (m dashboardModel) View() string {
 		b.WriteString(rowIndent + dashErrStyle.Render("⚠ last launch failed: "+m.err.Error()) + "\n")
 	}
 	if m.actionBusy {
-		b.WriteString(rowIndent + dashMutedStyle.Render("running…") + "\n")
+		busyLabel := m.actionMsg
+		if busyLabel == "" {
+			busyLabel = "running…"
+		}
+		b.WriteString(rowIndent + dashMutedStyle.Render(busyLabel) + "\n")
 	} else if m.actionMsg != "" {
 		style := dashOKStyle
 		if strings.HasPrefix(m.actionMsg, "✗") {
