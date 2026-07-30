@@ -29,8 +29,10 @@ type agendaItem struct {
 	text    string
 }
 
-func runAgenda(_ *cobra.Command, _ []string) error {
-	now := time.Now()
+// buildAgendaItems fetches and dedups today's calendar events, due tasks,
+// and timer sessions — shared by the standalone `agenda` command and the
+// dashboard TUI's in-app agenda view so both show exactly the same data.
+func buildAgendaItems(now time.Time) []agendaItem {
 	var items []agendaItem
 
 	var cal struct {
@@ -109,9 +111,12 @@ func runAgenda(_ *cobra.Command, _ []string) error {
 		seen[key] = true
 		deduped = append(deduped, it)
 	}
-	items = deduped
+	return deduped
+}
 
-	var timed, allDay []agendaItem
+// splitAgendaItems buckets items into time-less ("sometime today") and
+// timed entries, the latter sorted chronologically.
+func splitAgendaItems(items []agendaItem) (allDay, timed []agendaItem) {
 	for _, it := range items {
 		if it.hasTime {
 			timed = append(timed, it)
@@ -120,6 +125,12 @@ func runAgenda(_ *cobra.Command, _ []string) error {
 		}
 	}
 	sort.Slice(timed, func(i, j int) bool { return timed[i].when.Before(timed[j].when) })
+	return
+}
+
+func runAgenda(_ *cobra.Command, _ []string) error {
+	now := time.Now()
+	allDay, timed := splitAgendaItems(buildAgendaItems(now))
 
 	headerStyle := lipgloss.NewStyle().Bold(true)
 	timeStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("245")).Width(6)

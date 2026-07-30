@@ -164,6 +164,11 @@ type dashboardModel struct {
 	now         time.Time
 	actionMsg   string // result of the last "x" quick action, cleared on next action/refresh
 	actionBusy  bool
+
+	showAgenda   bool // "a" toggles between the card grid and the agenda view
+	agendaLoad   bool
+	agendaAllDay []agendaItem
+	agendaTimed  []agendaItem
 }
 
 func newDashboardModel() dashboardModel {
@@ -206,31 +211,48 @@ func (m dashboardModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case "ctrl+c", "q", "esc":
 			return m, tea.Quit
 		case "j", "down":
-			if m.cursor+cardCols < len(dashboardCards) {
+			if !m.showAgenda && m.cursor+cardCols < len(dashboardCards) {
 				m.cursor += cardCols
 			}
 			return m, nil
 		case "k", "up":
-			if m.cursor-cardCols >= 0 {
+			if !m.showAgenda && m.cursor-cardCols >= 0 {
 				m.cursor -= cardCols
 			}
 			return m, nil
 		case "h", "left":
-			if m.cursor%cardCols != 0 {
+			if !m.showAgenda && m.cursor%cardCols != 0 {
 				m.cursor--
 			}
 			return m, nil
 		case "l", "right":
-			if m.cursor%cardCols != cardCols-1 && m.cursor < len(dashboardCards)-1 {
+			if !m.showAgenda && m.cursor%cardCols != cardCols-1 && m.cursor < len(dashboardCards)-1 {
 				m.cursor++
 			}
 			return m, nil
 		case "r":
+			if m.showAgenda {
+				m.agendaLoad = true
+				return m, loadAgendaCmd()
+			}
 			m.refresh()
 			return m, nil
+		case "a":
+			m.showAgenda = !m.showAgenda
+			if m.showAgenda {
+				m.agendaLoad = true
+				return m, loadAgendaCmd()
+			}
+			return m, nil
 		case "enter":
+			if m.showAgenda {
+				return m, nil
+			}
 			return m, m.launch(dashboardCards[m.cursor].tool)
 		case "x":
+			if m.showAgenda {
+				return m, nil
+			}
 			card := dashboardCards[m.cursor]
 			if card.action == nil || m.actionBusy {
 				return m, nil
@@ -246,10 +268,12 @@ func (m dashboardModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.actionMsg = ""
 			return m, runQuickAction(syncAllTools)
 		}
-		for i, c := range dashboardCards {
-			if msg.String() == c.key {
-				m.cursor = i
-				return m, m.launch(c.tool)
+		if !m.showAgenda {
+			for i, c := range dashboardCards {
+				if msg.String() == c.key {
+					m.cursor = i
+					return m, m.launch(c.tool)
+				}
 			}
 		}
 
@@ -267,8 +291,27 @@ func (m dashboardModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.refresh()
 		}
 		return m, nil
+
+	case agendaLoadedMsg:
+		m.agendaLoad = false
+		m.agendaAllDay = msg.allDay
+		m.agendaTimed = msg.timed
+		return m, nil
 	}
 	return m, nil
+}
+
+// agendaLoadedMsg carries the same calendar/task/timer merge that the
+// standalone `agenda` command prints, computed off the UI goroutine (it
+// shells out to three tools) so toggling the view never freezes input.
+type agendaLoadedMsg struct{ allDay, timed []agendaItem }
+
+func loadAgendaCmd() tea.Cmd {
+	return func() tea.Msg {
+		now := time.Now()
+		allDay, timed := splitAgendaItems(buildAgendaItems(now))
+		return agendaLoadedMsg{allDay: allDay, timed: timed}
+	}
 }
 
 type quickActionMsg struct {
@@ -462,23 +505,57 @@ func (m dashboardModel) renderHeader() string {
 	return line + "\n" + rule
 }
 
+// renderAgenda draws the merged calendar/task/timer timeline in place of the
+// card grid, reusing the same data buildAgendaItems/splitAgendaItems produce
+// for the standalone `agenda` command.
+func (m dashboardModel) renderAgenda() string {
+	if m.agendaLoad {
+		return rowIndent + dashMutedStyle.Render("loading agenda…") + "\n"
+	}
+
+	var b strings.Builder
+	timeStyle := lipgloss.NewStyle().Foreground(dashMuted).Width(6)
+
+	if len(m.agendaAllDay) == 0 && len(m.agendaTimed) == 0 {
+		b.WriteString(rowIndent + dashMutedStyle.Render("Nothing scheduled today.") + "\n")
+		return b.String()
+	}
+
+	printItem := func(it agendaItem, timeLabel string) {
+		iconStyle := lipgloss.NewStyle().Foreground(it.color)
+		line := fmt.Sprintf("%s %s  %s", timeStyle.Render(timeLabel), iconStyle.Render(it.icon), it.text)
+		b.WriteString(rowIndent + line + "\n")
+	}
+	for _, it := range m.agendaAllDay {
+		printItem(it, "")
+	}
+	for _, it := range m.agendaTimed {
+		printItem(it, it.when.Format("15:04"))
+	}
+	return b.String()
+}
+
 func (m dashboardModel) View() string {
 	var b strings.Builder
 
 	b.WriteString("\n" + m.renderHeader() + "\n\n")
 
-	// grid: 2 cards per row, with a visible gap between columns
-	for row := 0; row < len(dashboardCards); row += cardCols {
-		var cells []string
-		for col := 0; col < cardCols && row+col < len(dashboardCards); col++ {
-			if col > 0 {
-				cells = append(cells, cardGap)
+	if m.showAgenda {
+		b.WriteString(m.renderAgenda())
+	} else {
+		// grid: 2 cards per row, with a visible gap between columns
+		for row := 0; row < len(dashboardCards); row += cardCols {
+			var cells []string
+			for col := 0; col < cardCols && row+col < len(dashboardCards); col++ {
+				if col > 0 {
+					cells = append(cells, cardGap)
+				}
+				cells = append(cells, m.renderCard(row+col))
 			}
-			cells = append(cells, m.renderCard(row+col))
-		}
-		rowBlock := lipgloss.JoinHorizontal(lipgloss.Top, cells...)
-		for _, l := range strings.Split(rowBlock, "\n") {
-			b.WriteString(rowIndent + l + "\n")
+			rowBlock := lipgloss.JoinHorizontal(lipgloss.Top, cells...)
+			for _, l := range strings.Split(rowBlock, "\n") {
+				b.WriteString(rowIndent + l + "\n")
+			}
 		}
 	}
 
@@ -496,19 +573,30 @@ func (m dashboardModel) View() string {
 		b.WriteString(rowIndent + style.Render(m.actionMsg) + "\n")
 	}
 
-	xHint := ""
-	if dashboardCards[m.cursor].action != nil {
-		xHint = fmt.Sprintf("  %s quick action", dashKeyStyle.Render("x"))
+	var footer string
+	if m.showAgenda {
+		footer = fmt.Sprintf(
+			"%s dashboard  %s reload  %s quit",
+			dashKeyStyle.Render("a"),
+			dashKeyStyle.Render("r"),
+			dashKeyStyle.Render("q"),
+		)
+	} else {
+		xHint := ""
+		if dashboardCards[m.cursor].action != nil {
+			xHint = fmt.Sprintf("  %s quick action", dashKeyStyle.Render("x"))
+		}
+		footer = fmt.Sprintf(
+			"%s/%s row  %s/%s column  %s or number jump in%s  %s refresh  %s sync all  %s agenda  %s quit",
+			dashKeyStyle.Render("↑"), dashKeyStyle.Render("↓"),
+			dashKeyStyle.Render("←"), dashKeyStyle.Render("→"),
+			dashKeyStyle.Render("enter"), xHint,
+			dashKeyStyle.Render("r"),
+			dashKeyStyle.Render("s"),
+			dashKeyStyle.Render("a"),
+			dashKeyStyle.Render("q"),
+		)
 	}
-	footer := fmt.Sprintf(
-		"%s/%s row  %s/%s column  %s or number jump in%s  %s refresh  %s sync all  %s quit",
-		dashKeyStyle.Render("↑"), dashKeyStyle.Render("↓"),
-		dashKeyStyle.Render("←"), dashKeyStyle.Render("→"),
-		dashKeyStyle.Render("enter"), xHint,
-		dashKeyStyle.Render("r"),
-		dashKeyStyle.Render("s"),
-		dashKeyStyle.Render("q"),
-	)
 	b.WriteString(rowIndent + dashFootStyle.Render(footer) + "\n")
 
 	return b.String()
