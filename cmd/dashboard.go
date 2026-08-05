@@ -6,6 +6,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/aeon022/missionctl-core/theme"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/spf13/cobra"
@@ -380,18 +381,23 @@ func (m dashboardModel) launch(tool string) tea.Cmd {
 	})
 }
 
+// Dashboard status/chrome colors used to be hardcoded lipgloss.Color values
+// tuned only for a dark terminal background (dashFg was plain white "255"
+// with no background behind it in dashKeyStyle/summaryStyle — invisible on
+// a light terminal theme). Switched to missionctl-core/theme's
+// AdaptiveColor palette, same one the other seven tools in the suite
+// already share, so the dashboard follows the terminal's light/dark mode
+// like everything else does.
 var (
-	dashBg            = lipgloss.Color("235")
-	dashFg            = lipgloss.Color("255")
-	dashMuted         = lipgloss.Color("245")
-	dashSubtle        = lipgloss.Color("240")
-	dashErrColor      = lipgloss.Color("203")
-	dashWarnColor     = lipgloss.Color("214")
-	dashCriticalColor = lipgloss.Color("203")
+	dashMuted         = theme.Muted
+	dashSubtle        = theme.Subtle
+	dashErrColor      = theme.Red
+	dashWarnColor     = theme.Amber
+	dashCriticalColor = theme.Red
 
 	dashTitleStyle = lipgloss.NewStyle().
 			Bold(true).
-			Foreground(dashFg).
+			Foreground(theme.OnAccent).
 			Background(lipgloss.Color("57")).
 			Padding(0, 2)
 
@@ -399,9 +405,9 @@ var (
 	dashRuleStyle    = lipgloss.NewStyle().Foreground(dashSubtle)
 	dashClockStyle   = lipgloss.NewStyle().Foreground(dashMuted)
 	dashFootStyle    = lipgloss.NewStyle().Foreground(dashSubtle)
-	dashKeyStyle     = lipgloss.NewStyle().Foreground(dashFg).Bold(true)
+	dashKeyStyle     = lipgloss.NewStyle().Foreground(theme.Amber).Bold(true)
 	dashErrStyle     = lipgloss.NewStyle().Foreground(dashErrColor).Bold(true)
-	dashOKStyle      = lipgloss.NewStyle().Foreground(lipgloss.Color("42")).Bold(true)
+	dashOKStyle      = lipgloss.NewStyle().Foreground(theme.Green).Bold(true)
 	dashMutedStyle   = lipgloss.NewStyle().Foreground(dashMuted)
 )
 
@@ -428,7 +434,7 @@ func (m dashboardModel) renderCard(i int) string {
 	w := m.cardWidth()
 	selected := i == m.cursor
 
-	cardColor := c.color
+	var cardColor lipgloss.TerminalColor = c.color
 	switch m.values[i].urgency {
 	case urgencyCritical:
 		cardColor = dashCriticalColor
@@ -463,7 +469,11 @@ func (m dashboardModel) renderCard(i int) string {
 	value := m.values[i]
 	summaryLine, detailLine, _ := strings.Cut(value.text, "\n")
 
-	summaryStyle := lipgloss.NewStyle().Foreground(dashFg).Width(w - 2)
+	// No Foreground set here on purpose — this is the primary card value
+	// text and should inherit the terminal's own default foreground, which
+	// is readable against that terminal's background by definition. The
+	// old hardcoded white ("255") broke exactly this on light themes.
+	summaryStyle := lipgloss.NewStyle().Width(w - 2)
 	if summaryLine == "" || strings.HasPrefix(summaryLine, "–") {
 		summaryStyle = summaryStyle.Foreground(dashSubtle)
 	}
@@ -596,22 +606,35 @@ func (m dashboardModel) View() string {
 	}
 
 	b.WriteString("\n")
+	// Both lines below are written unconditionally (blank when there's
+	// nothing to show) so the view's total line count never changes
+	// between frames. It used to skip the line entirely when m.err/
+	// m.actionMsg was empty, which shrank the frame — with
+	// tea.WithAltScreen(), bubbletea only repaints as many lines as the
+	// *current* frame has, so a shorter frame left a stale line from the
+	// previous, taller one sitting just below the new footer (looked like
+	// a duplicated key bar).
+	errLine := ""
 	if m.err != nil {
-		b.WriteString(rowIndent + dashErrStyle.Render("⚠ last launch failed: "+m.err.Error()) + "\n")
+		errLine = dashErrStyle.Render("⚠ last launch failed: " + m.err.Error())
 	}
+	b.WriteString(rowIndent + errLine + "\n")
+
+	statusLine := ""
 	if m.actionBusy {
 		busyLabel := m.actionMsg
 		if busyLabel == "" {
 			busyLabel = "running…"
 		}
-		b.WriteString(rowIndent + dashMutedStyle.Render(busyLabel) + "\n")
+		statusLine = dashMutedStyle.Render(busyLabel)
 	} else if m.actionMsg != "" {
 		style := dashOKStyle
 		if strings.HasPrefix(m.actionMsg, "✗") {
 			style = dashErrStyle
 		}
-		b.WriteString(rowIndent + style.Render(m.actionMsg) + "\n")
+		statusLine = style.Render(m.actionMsg)
 	}
+	b.WriteString(rowIndent + statusLine + "\n")
 
 	var footer string
 	if m.showAgenda {
