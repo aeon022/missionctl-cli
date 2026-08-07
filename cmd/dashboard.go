@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/aeon022/missionctl-core/theme"
+	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/spf13/cobra"
@@ -178,10 +179,21 @@ type dashboardModel struct {
 	agendaLoad   bool
 	agendaAllDay []agendaItem
 	agendaTimed  []agendaItem
+
+	showSettings    bool // "L" toggles the license settings screen (see settings.go)
+	settingsInput   textinput.Model
+	settingsBusy    bool
+	settingsResults []toolResult
+	settingsMsg     string
 }
 
 func newDashboardModel() dashboardModel {
-	m := dashboardModel{now: time.Now(), width: 80}
+	ti := textinput.New()
+	ti.Placeholder = "paste your Bundle key…"
+	ti.CharLimit = 200
+	ti.Width = 50
+
+	m := dashboardModel{now: time.Now(), width: 80, settingsInput: ti}
 	m.refresh()
 	return m
 }
@@ -203,6 +215,10 @@ func (m dashboardModel) Init() tea.Cmd {
 }
 
 func (m dashboardModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+	if next, cmd, handled := m.settingsMsgUpdate(msg); handled {
+		return next, cmd
+	}
+
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
 		m.width, m.height = msg.Width, msg.Height
@@ -225,6 +241,9 @@ func (m dashboardModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, tickEvery(time.Second)
 
 	case tea.KeyMsg:
+		if m.showSettings {
+			return m.updateSettings(msg)
+		}
 		switch msg.String() {
 		case "ctrl+c", "q", "esc":
 			return m, tea.Quit
@@ -286,6 +305,16 @@ func (m dashboardModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.syncFailed = nil
 			m.actionMsg = syncStepLabel(0)
 			return m, syncStepCmd(0)
+		case "L":
+			if m.showAgenda {
+				return m, nil
+			}
+			m.showSettings = true
+			m.settingsMsg = ""
+			m.settingsInput.SetValue("")
+			m.settingsInput.Focus()
+			m.settingsBusy = true
+			return m, loadSettingsStatusCmd()
 		}
 		if !m.showAgenda {
 			for i, c := range dashboardCards {
@@ -582,6 +611,10 @@ func (m dashboardModel) renderAgenda() string {
 }
 
 func (m dashboardModel) View() string {
+	if m.showSettings {
+		return m.renderSettings()
+	}
+
 	var b strings.Builder
 
 	b.WriteString("\n" + m.renderHeader() + "\n\n")
@@ -650,13 +683,14 @@ func (m dashboardModel) View() string {
 			xHint = fmt.Sprintf("  %s quick action", dashKeyStyle.Render("x"))
 		}
 		footer = fmt.Sprintf(
-			"%s/%s row  %s/%s column  %s or number jump in%s  %s refresh  %s sync all  %s agenda  %s quit",
+			"%s/%s row  %s/%s column  %s or number jump in%s  %s refresh  %s sync all  %s agenda  %s license  %s quit",
 			dashKeyStyle.Render("↑"), dashKeyStyle.Render("↓"),
 			dashKeyStyle.Render("←"), dashKeyStyle.Render("→"),
 			dashKeyStyle.Render("enter"), xHint,
 			dashKeyStyle.Render("r"),
 			dashKeyStyle.Render("s"),
 			dashKeyStyle.Render("a"),
+			dashKeyStyle.Render("L"),
 			dashKeyStyle.Render("q"),
 		)
 	}
