@@ -12,15 +12,29 @@ import (
 // licensedTools are the tools that ship their own `<tool> license`
 // subcommand (see each one's cmd/license.go) — the rest of the suite
 // (taskctl, timectl, diaryctl) has no Pro gate yet, so there's nothing to
-// activate there.
+// activate there. Used for `license status`, which is read-only and safe
+// to run against every one of them, postctl included.
 var licensedTools = []string{"calctl", "budgetctl", "notectl", "habctl", "mailctl", "postctl"}
+
+// bundleTools are the licensedTools actually covered by the missionctl
+// Bundle key — postctl is deliberately excluded. It has always been its
+// own separate product with its own license (Bundle purchases never
+// unlock it), so running a Bundle key against it can only ever 403. Worse
+// than pointless: each tool's own `license activate` unconditionally
+// saves a failed attempt's result, which was overwriting postctl's real,
+// separately-activated key with "invalid" every time `missionctl license
+// activate <bundle-key>` ran — silently locking out a working license.
+var bundleTools = []string{"calctl", "budgetctl", "notectl", "habctl", "mailctl"}
 
 var licenseCmd = &cobra.Command{
 	Use:   "license",
 	Short: "Activate your missionctl Bundle license across every tool at once",
-	Long: `A Bundle key unlocks every tool's Pro features. This is a thin
+	Long: `A Bundle key unlocks every Bundle tool's Pro features. This is a thin
 wrapper that runs each installed tool's own "license activate"/"license
-status" once, so you enter the key here instead of six separate times.`,
+status" once, so you enter the key here instead of five separate times.
+postctl has its own separate product license and isn't part of the
+Bundle — "license status" still reports it, but "license activate" skips
+it.`,
 }
 
 var licenseActivateCmd = &cobra.Command{
@@ -105,8 +119,8 @@ type toolResult struct {
 // activateAll runs `<tool> license activate <key>` on every installed
 // licensedTool.
 func activateAll(key string) []toolResult {
-	results := make([]toolResult, 0, len(licensedTools))
-	for _, name := range licensedTools {
+	results := make([]toolResult, 0, len(bundleTools))
+	for _, name := range bundleTools {
 		if _, err := exec.LookPath(name); err != nil {
 			results = append(results, toolResult{tool: name})
 			continue
