@@ -207,7 +207,7 @@ func timerStatus(_ time.Time) cardStatus {
 }
 
 func diaryStatus() cardStatus {
-	db, err := openDB("~/.local/share/diaryctl/diary.db")
+	db, err := openDB(resolvedToolDBPath("diaryctl"))
 	if err != nil || db == nil {
 		return cardStatus{text: "–  not configured"}
 	}
@@ -346,7 +346,7 @@ func noteStatus(now time.Time) cardStatus {
 }
 
 func mailStatus() cardStatus {
-	db, err := openDB("~/Library/Application Support/mailctl/mailctl.db")
+	db, err := openDB(resolvedToolDBPath("mailctl"))
 	if err != nil || db == nil {
 		return cardStatus{text: "–  not configured"}
 	}

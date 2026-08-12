@@ -182,13 +182,21 @@ var toolDB = map[string]string{
 }
 
 // toolDBEnvPrefix lists the tools whose own config supports redirecting
-// their data directory away from the private default in toolDB (e.g.
-// NOTECTL_DATA_DIR pointing notectl's DB into a Dropbox-synced folder —
-// see notectl/internal/config.DBPath). Only notectl is wired up here for
-// now; other tools that support the same data_dir convention can be added
-// once their status/doctor cards need it too.
+// their data directory away from the private default in toolDB via a
+// <PREFIX>_DATA_DIR env var (e.g. NOTECTL_DATA_DIR pointing notectl's DB
+// into a Dropbox-synced folder — see notectl/internal/config.DBPath and
+// each other tool's own internal/config or internal/store package for the
+// same convention). All eight tools that ship a DB support it; confirmed
+// against each one's own source, not just this repo's env var usage.
 var toolDBEnvPrefix = map[string]string{
-	"notectl": "NOTECTL",
+	"mailctl":   "MAILCTL",
+	"calctl":    "CALCTL",
+	"taskctl":   "TASKCTL",
+	"notectl":   "NOTECTL",
+	"budgetctl": "BUDGETCTL",
+	"habctl":    "HABCTL",
+	"timectl":   "TIMECTL",
+	"diaryctl":  "DIARYCTL",
 }
 
 // resolvedToolDBPath returns a tool's actual on-disk DB path, honoring its
