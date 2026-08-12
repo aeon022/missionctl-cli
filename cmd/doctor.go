@@ -181,6 +181,29 @@ var toolDB = map[string]string{
 	"diaryctl":  "~/.local/share/diaryctl/diary.db",
 }
 
+// toolDBEnvPrefix lists the tools whose own config supports redirecting
+// their data directory away from the private default in toolDB (e.g.
+// NOTECTL_DATA_DIR pointing notectl's DB into a Dropbox-synced folder —
+// see notectl/internal/config.DBPath). Only notectl is wired up here for
+// now; other tools that support the same data_dir convention can be added
+// once their status/doctor cards need it too.
+var toolDBEnvPrefix = map[string]string{
+	"notectl": "NOTECTL",
+}
+
+// resolvedToolDBPath returns a tool's actual on-disk DB path, honoring its
+// own <PREFIX>_DATA_DIR override when set instead of assuming toolDB's
+// private-default path always applies.
+func resolvedToolDBPath(tool string) string {
+	defaultPath := toolDB[tool]
+	if prefix, ok := toolDBEnvPrefix[tool]; ok {
+		if dir := os.Getenv(prefix + "_DATA_DIR"); dir != "" {
+			return filepath.Join(expandHome(dir), filepath.Base(defaultPath))
+		}
+	}
+	return defaultPath
+}
+
 // toolDBOrder keeps the database status output in a stable, readable order.
 var toolDBOrder = []string{"mailctl", "calctl", "taskctl", "notectl", "budgetctl", "habctl", "timectl", "diaryctl"}
 
@@ -189,7 +212,7 @@ func checkDatabases(checkMark, dashMark string, nameStyle, pathStyle lipgloss.St
 	fmt.Println()
 
 	for _, name := range toolDBOrder {
-		path := expandHome(toolDB[name])
+		path := expandHome(resolvedToolDBPath(name))
 		info, err := os.Stat(path)
 		if err != nil {
 			fmt.Printf("  %s %s  not created yet\n", nameStyle.Render(name), dashMark)

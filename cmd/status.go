@@ -71,11 +71,10 @@ func openDB(path string) (*sql.DB, error) {
 // doctor.go), reused here instead of duplicated so a card's data can't be
 // old enough to be misleading without it being visible right on the card.
 func syncAge(tool string) string {
-	path, ok := toolDB[tool]
-	if !ok {
+	if _, ok := toolDB[tool]; !ok {
 		return ""
 	}
-	info, err := os.Stat(expandHome(path))
+	info, err := os.Stat(expandHome(resolvedToolDBPath(tool)))
 	if err != nil {
 		return "not synced yet"
 	}
@@ -318,7 +317,7 @@ func habitStatus(_ time.Time) cardStatus {
 }
 
 func noteStatus(now time.Time) cardStatus {
-	db, err := openDB("~/.local/share/notectl/notes.db")
+	db, err := openDB(resolvedToolDBPath("notectl"))
 	if err != nil || db == nil {
 		return cardStatus{text: "–  not configured"}
 	}
