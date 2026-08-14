@@ -6,6 +6,8 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
+	"strconv"
 	"time"
 
 	"github.com/charmbracelet/lipgloss"
@@ -255,6 +257,44 @@ var daemons = []daemon{
 	{"taskctl", "com.taskctl.daemon"},
 }
 
+// daemonStatus is what `launchctl list <label>` tells us about a loaded
+// job — parsed out of its plain property-list-style text dump (no `-json`
+// output flag on this launchctl subcommand across the macOS versions this
+// needs to run on, so text parsing it is).
+type daemonStatus struct {
+	pid            string // "" if the job isn't currently running
+	lastExitStatus int
+	onDemand       bool
+}
+
+var (
+	pidRe      = regexp.MustCompile(`"PID"\s*=\s*(\d+);`)
+	exitRe     = regexp.MustCompile(`"LastExitStatus"\s*=\s*(-?\d+);`)
+	onDemandRe = regexp.MustCompile(`"OnDemand"\s*=\s*(true|false);`)
+)
+
+func parseDaemonStatus(out string) daemonStatus {
+	var s daemonStatus
+	if m := pidRe.FindStringSubmatch(out); m != nil {
+		s.pid = m[1]
+	}
+	if m := exitRe.FindStringSubmatch(out); m != nil {
+		s.lastExitStatus, _ = strconv.Atoi(m[1])
+	}
+	if m := onDemandRe.FindStringSubmatch(out); m != nil {
+		s.onDemand = m[1] == "true"
+	}
+	return s
+}
+
+// checkDaemons reports each daemon's actual liveness, not just whether
+// launchd knows about it — "loaded" used to be the final word here even
+// for a continuous daemon (OnDemand=false, meant to always have a PID)
+// that had silently died and launchd hadn't respawned, or one whose last
+// run had failed outright. Both looked identical to "loaded" before: this
+// is exactly the gap that made postctl's missed scheduled posts (no daemon
+// installed at all, in that case) take manual digging to diagnose instead
+// of showing up here directly.
 func checkDaemons(checkMark, crossMark, dashMark string, nameStyle, pathStyle lipgloss.Style) {
 	fmt.Println("  launchd daemons:")
 	fmt.Println()
@@ -266,11 +306,24 @@ func checkDaemons(checkMark, crossMark, dashMark string, nameStyle, pathStyle li
 			fmt.Printf("  %s %s  not installed — see `%s daemon --install`\n", nameStyle.Render(d.tool), dashMark, d.tool)
 			continue
 		}
-		if err := exec.Command("launchctl", "list", d.label).Run(); err != nil {
+		out, err := exec.Command("launchctl", "list", d.label).Output()
+		if err != nil {
 			fmt.Printf("  %s %s  plist exists but not loaded — try `launchctl load -w %s`\n",
 				nameStyle.Render(d.tool), crossMark, pathStyle.Render(plistPath))
 			continue
 		}
-		fmt.Printf("  %s %s  loaded\n", nameStyle.Render(d.tool), checkMark)
+
+		status := parseDaemonStatus(string(out))
+		switch {
+		case status.lastExitStatus != 0:
+			fmt.Printf("  %s %s  last run failed (exit %d) — check its log\n", nameStyle.Render(d.tool), crossMark, status.lastExitStatus)
+		case !status.onDemand && status.pid == "":
+			fmt.Printf("  %s %s  loaded but not running — should be continuous, try `launchctl kickstart -k gui/$(id -u)/%s`\n",
+				nameStyle.Render(d.tool), crossMark, d.label)
+		case status.pid != "":
+			fmt.Printf("  %s %s  running (pid %s)\n", nameStyle.Render(d.tool), checkMark, status.pid)
+		default:
+			fmt.Printf("  %s %s  scheduled, last run OK\n", nameStyle.Render(d.tool), checkMark)
+		}
 	}
 }
