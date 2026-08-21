@@ -53,6 +53,20 @@ func expandHome(path string) string {
 	return path
 }
 
+// installTool runs the given tool's own setup.sh — the shared build+install
+// step behind `install`, `update`, and `init`'s missing-tool prompt, which
+// used to be reimplemented in each of those three places. On failure the
+// returned error is the first line of setup.sh's combined output.
+func installTool(t tool) error {
+	toolPath := filepath.Join(expandHome("~/Developing/Projects/missionctl"), t.project)
+	setup := exec.Command("bash", filepath.Join(toolPath, "setup.sh"))
+	setup.Dir = toolPath
+	if out, err := setup.CombinedOutput(); err != nil {
+		return fmt.Errorf("%s", firstLine(string(out)))
+	}
+	return nil
+}
+
 func openDB(path string) (*sql.DB, error) {
 	expanded := expandHome(path)
 	if _, err := os.Stat(expanded); os.IsNotExist(err) {

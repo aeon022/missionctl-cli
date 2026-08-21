@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/charmbracelet/lipgloss"
@@ -49,11 +50,6 @@ var envVars = []envVar{
 }
 
 func runDoctor(cmd *cobra.Command, args []string) error {
-	checkMark := lipgloss.NewStyle().Foreground(lipgloss.Color("10")).Bold(true).Render("✓")
-	crossMark := lipgloss.NewStyle().Foreground(lipgloss.Color("9")).Bold(true).Render("✗")
-	dashMark := lipgloss.NewStyle().Foreground(lipgloss.Color("8")).Render("–")
-
-	nameStyle := lipgloss.NewStyle().Width(14)
 	pathStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("8"))
 	labelStyle := lipgloss.NewStyle().Width(22)
 
@@ -116,9 +112,17 @@ func runDoctor(cmd *cobra.Command, args []string) error {
 	return nil
 }
 
-// mcpTools lists every tool that ships an `<tool> mcp` subcommand (all of
-// `tools` except missionctl itself, which has no MCP server).
-var mcpTools = []string{"mailctl", "calctl", "taskctl", "notectl", "budgetctl", "postctl", "diaryctl", "timectl", "habctl"}
+// mcpTools lists every tool that ships an `<tool> mcp` subcommand — every
+// entry in `tools` (missionctl itself has no MCP server and isn't in that
+// list) — derived directly instead of kept as a second hand-written copy
+// that could drift out of sync with it.
+var mcpTools = func() []string {
+	names := make([]string, len(tools))
+	for i, t := range tools {
+		names[i] = t.name
+	}
+	return names
+}()
 
 func checkMCPConfig(checkMark, crossMark string, nameStyle, pathStyle lipgloss.Style) {
 	fmt.Println("  MCP registration (~/.claude.json):")
@@ -183,33 +187,18 @@ var toolDB = map[string]string{
 	"diaryctl":  "~/.local/share/diaryctl/diary.db",
 }
 
-// toolDBEnvPrefix lists the tools whose own config supports redirecting
-// their data directory away from the private default in toolDB via a
-// <PREFIX>_DATA_DIR env var (e.g. NOTECTL_DATA_DIR pointing notectl's DB
-// into a Dropbox-synced folder — see notectl/internal/config.DBPath and
-// each other tool's own internal/config or internal/store package for the
-// same convention). All eight tools that ship a DB support it; confirmed
-// against each one's own source, not just this repo's env var usage.
-var toolDBEnvPrefix = map[string]string{
-	"mailctl":   "MAILCTL",
-	"calctl":    "CALCTL",
-	"taskctl":   "TASKCTL",
-	"notectl":   "NOTECTL",
-	"budgetctl": "BUDGETCTL",
-	"habctl":    "HABCTL",
-	"timectl":   "TIMECTL",
-	"diaryctl":  "DIARYCTL",
-}
-
 // resolvedToolDBPath returns a tool's actual on-disk DB path, honoring its
 // own <PREFIX>_DATA_DIR override when set instead of assuming toolDB's
-// private-default path always applies.
+// private-default path always applies (e.g. NOTECTL_DATA_DIR pointing
+// notectl's DB into a Dropbox-synced folder — see notectl/internal/config.DBPath
+// and each other tool's own internal/config or internal/store package for
+// the same convention). All eight tools that ship a DB support it, and each
+// one's prefix is just its name uppercased; confirmed against each one's
+// own source, not just this repo's env var usage.
 func resolvedToolDBPath(tool string) string {
 	defaultPath := toolDB[tool]
-	if prefix, ok := toolDBEnvPrefix[tool]; ok {
-		if dir := os.Getenv(prefix + "_DATA_DIR"); dir != "" {
-			return filepath.Join(expandHome(dir), filepath.Base(defaultPath))
-		}
+	if dir := os.Getenv(strings.ToUpper(tool) + "_DATA_DIR"); dir != "" {
+		return filepath.Join(expandHome(dir), filepath.Base(defaultPath))
 	}
 	return defaultPath
 }

@@ -438,6 +438,15 @@ var (
 	dashErrStyle     = lipgloss.NewStyle().Foreground(dashErrColor).Bold(true)
 	dashOKStyle      = lipgloss.NewStyle().Foreground(theme.Green).Bold(true)
 	dashMutedStyle   = lipgloss.NewStyle().Foreground(dashMuted)
+
+	// checkMark/crossMark/dashMark/nameStyle: the ✓/✗/– status marks and
+	// name-column width shared by doctor/install/update/license/settings'
+	// per-tool status lines — previously redeclared identically in each of
+	// those files.
+	checkMark = dashOKStyle.Render("✓")
+	crossMark = dashErrStyle.Render("✗")
+	dashMark  = lipgloss.NewStyle().Foreground(dashSubtle).Render("–")
+	nameStyle = lipgloss.NewStyle().Width(14)
 )
 
 const (

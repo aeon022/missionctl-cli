@@ -3,9 +3,7 @@ package cmd
 import (
 	"fmt"
 	"os/exec"
-	"path/filepath"
 
-	"github.com/charmbracelet/lipgloss"
 	"github.com/spf13/cobra"
 )
 
@@ -18,13 +16,6 @@ var installCmd = &cobra.Command{
 }
 
 func runInstall(cmd *cobra.Command, args []string) error {
-	checkMark := lipgloss.NewStyle().Foreground(lipgloss.Color("10")).Bold(true).Render("✓")
-	crossMark := lipgloss.NewStyle().Foreground(lipgloss.Color("9")).Bold(true).Render("✗")
-	dashMark := lipgloss.NewStyle().Foreground(lipgloss.Color("8")).Render("–")
-	nameStyle := lipgloss.NewStyle().Width(14)
-
-	root := expandHome("~/Developing/Projects/missionctl")
-
 	fmt.Println()
 	installed, failed := 0, []string{}
 
@@ -36,11 +27,8 @@ func runInstall(cmd *cobra.Command, args []string) error {
 			}
 		}
 
-		toolPath := filepath.Join(root, t.project)
-		setup := exec.Command("bash", filepath.Join(toolPath, "setup.sh"))
-		setup.Dir = toolPath
-		if out, err := setup.CombinedOutput(); err != nil {
-			fmt.Printf("  %s %s  setup.sh failed: %s\n", nameStyle.Render(t.name), crossMark, firstLine(string(out)))
+		if err := installTool(t); err != nil {
+			fmt.Printf("  %s %s  setup.sh failed: %s\n", nameStyle.Render(t.name), crossMark, err)
 			failed = append(failed, t.name)
 			continue
 		}

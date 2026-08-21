@@ -80,12 +80,8 @@ func runInit(_ *cobra.Command, _ []string) error {
 		if strings.ToLower(answer) == "y" {
 			for _, t := range tools {
 				if _, err := exec.LookPath(t.name); err != nil {
-					setupScript := fmt.Sprintf("%s/%s/setup.sh", os.ExpandEnv("$HOME/Developing/Projects/missionctl"), t.project)
 					fmt.Printf("\n  Installing %s...\n", t.name)
-					installCmd := exec.Command("bash", setupScript)
-					installCmd.Stdout = os.Stdout
-					installCmd.Stderr = os.Stderr
-					if err := installCmd.Run(); err != nil {
+					if err := installTool(t); err != nil {
 						fmt.Printf("  Failed to install %s: %v\n", t.name, err)
 					}
 				}

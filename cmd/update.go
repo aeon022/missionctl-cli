@@ -5,8 +5,8 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 
-	"github.com/charmbracelet/lipgloss"
 	"github.com/spf13/cobra"
 )
 
@@ -17,10 +17,6 @@ var updateCmd = &cobra.Command{
 }
 
 func runUpdate(cmd *cobra.Command, args []string) error {
-	checkMark := lipgloss.NewStyle().Foreground(lipgloss.Color("10")).Bold(true).Render("✓")
-	crossMark := lipgloss.NewStyle().Foreground(lipgloss.Color("9")).Bold(true).Render("✗")
-	nameStyle := lipgloss.NewStyle().Width(14)
-
 	root := expandHome("~/Developing/Projects/missionctl")
 
 	fmt.Println()
@@ -40,10 +36,8 @@ func runUpdate(cmd *cobra.Command, args []string) error {
 			continue
 		}
 
-		setup := exec.Command("bash", filepath.Join(toolPath, "setup.sh"))
-		setup.Dir = toolPath
-		if out, err := setup.CombinedOutput(); err != nil {
-			fmt.Printf("  %s %s  setup.sh failed: %s\n", nameStyle.Render(t.name), crossMark, firstLine(string(out)))
+		if err := installTool(t); err != nil {
+			fmt.Printf("  %s %s  setup.sh failed: %s\n", nameStyle.Render(t.name), crossMark, err)
 			failed = append(failed, t.name)
 			continue
 		}
@@ -63,10 +57,6 @@ func runUpdate(cmd *cobra.Command, args []string) error {
 }
 
 func firstLine(s string) string {
-	for i, r := range s {
-		if r == '\n' {
-			return s[:i]
-		}
-	}
-	return s
+	before, _, _ := strings.Cut(s, "\n")
+	return before
 }

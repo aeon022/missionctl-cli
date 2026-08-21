@@ -59,10 +59,6 @@ func init() {
 func runLicenseActivate(cmd *cobra.Command, args []string) error {
 	key := strings.TrimSpace(args[0])
 
-	checkMark := lipgloss.NewStyle().Foreground(lipgloss.Color("10")).Bold(true).Render("✓")
-	crossMark := lipgloss.NewStyle().Foreground(lipgloss.Color("9")).Bold(true).Render("✗")
-	dashMark := lipgloss.NewStyle().Foreground(lipgloss.Color("8")).Render("–")
-	nameStyle := lipgloss.NewStyle().Width(14)
 	detailStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("8"))
 
 	fmt.Println()
@@ -94,7 +90,6 @@ func runLicenseActivate(cmd *cobra.Command, args []string) error {
 }
 
 func runLicenseStatus(cmd *cobra.Command, args []string) error {
-	nameStyle := lipgloss.NewStyle().Width(14)
 	mutedStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("8"))
 
 	fmt.Println()

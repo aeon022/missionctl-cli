@@ -103,11 +103,6 @@ func (m dashboardModel) renderSettings() string {
 
 	b.WriteString(rowIndent + dashMutedStyle.Render("A Bundle key unlocks Pro features on every installed tool at once.") + "\n\n")
 
-	nameStyle := lipgloss.NewStyle().Width(14)
-	checkMark := lipgloss.NewStyle().Foreground(lipgloss.Color("10")).Bold(true).Render("✓")
-	crossMark := lipgloss.NewStyle().Foreground(lipgloss.Color("9")).Bold(true).Render("✗")
-	dashMark := lipgloss.NewStyle().Foreground(dashSubtle).Render("–")
-
 	if m.settingsBusy && len(m.settingsResults) == 0 {
 		b.WriteString(rowIndent + dashMutedStyle.Render("checking…") + "\n")
 	}
