@@ -135,6 +135,12 @@ func (m dashboardModel) renderSettings() string {
 		b.WriteString("\n")
 	}
 
+	if m.height > 0 {
+		for lines := strings.Count(b.String(), "\n"); lines < m.height-1; lines++ {
+			b.WriteString("\n")
+		}
+	}
+
 	footer := lipgloss.JoinHorizontal(lipgloss.Top,
 		dashKeyStyle.Render("enter"), dashFootStyle.Render(" activate  "),
 		dashKeyStyle.Render("r"), dashFootStyle.Render(" refresh status  "),

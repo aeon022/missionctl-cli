@@ -678,6 +678,15 @@ func (m dashboardModel) View() string {
 	}
 	b.WriteString(rowIndent + statusLine + "\n")
 
+	// Pin the footer to the bottom of the screen instead of letting it
+	// glue itself right under a short grid — pad the body out to the
+	// terminal height first.
+	if m.height > 0 {
+		for lines := strings.Count(b.String(), "\n"); lines < m.height-1; lines++ {
+			b.WriteString("\n")
+		}
+	}
+
 	var footer string
 	if m.showAgenda {
 		footer = fmt.Sprintf(
