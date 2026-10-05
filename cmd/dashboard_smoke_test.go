@@ -215,3 +215,74 @@ func TestDashboardHelpPopup(t *testing.T) {
 		t.Errorf("any key closes help without acting: showHelp=%v cmd=%v", m.showHelp, cmd != nil)
 	}
 }
+
+func TestDashboardSearchFlow(t *testing.T) {
+	m := newDashboardModel()
+	m.width, m.height = 100, 30
+	mi, _ := m.Update(tea.KeyPressMsg{Text: "/", Code: '/'})
+	m = mi.(dashboardModel)
+	if !m.showSearch || !m.searchTyping {
+		t.Fatalf("/ must open search in typing mode: show=%v typing=%v", m.showSearch, m.searchTyping)
+	}
+	for _, r := range "steuer" {
+		mi, _ = m.Update(tea.KeyPressMsg{Text: string(r), Code: r})
+		m = mi.(dashboardModel)
+	}
+	if got := m.searchInput.Value(); got != "steuer" {
+		t.Fatalf("query = %q", got)
+	}
+	// space must be typeable (v2 reports it as "space"; it still has to reach the field)
+	mi, _ = m.Update(tea.KeyPressMsg{Code: tea.KeySpace, Text: " "})
+	m = mi.(dashboardModel)
+	if got := m.searchInput.Value(); got != "steuer " {
+		t.Errorf("space not typed into the query: %q", got)
+	}
+	mi, cmd := m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
+	m = mi.(dashboardModel)
+	if !m.searchBusy || cmd == nil {
+		t.Fatalf("enter must start a search: busy=%v cmd=%v", m.searchBusy, cmd != nil)
+	}
+	if out := ansi.Strip(m.viewContent()); !strings.Contains(out, "searching…") {
+		t.Errorf("busy view:\n%s", out)
+	}
+
+	hits := []SearchHit{{Tool: "taskctl", Icon: "✓", Title: "Steuer abgeben"}, {Tool: "notectl", Icon: "📝", Title: "Steuer-Notiz"}}
+	mi, _ = m.Update(searchResultMsg{hits: hits})
+	m = mi.(dashboardModel)
+	if m.searchBusy || m.searchTyping || len(m.searchHits) != 2 {
+		t.Fatalf("after results: busy=%v typing=%v hits=%d (want browsing)", m.searchBusy, m.searchTyping, len(m.searchHits))
+	}
+	if out := ansi.Strip(m.viewContent()); !strings.Contains(out, "Steuer abgeben") || !strings.Contains(out, "▸") {
+		t.Errorf("results view:\n%s", out)
+	}
+	mi, _ = m.Update(tea.KeyPressMsg{Text: "j", Code: 'j'})
+	m = mi.(dashboardModel)
+	if m.searchCursor != 1 {
+		t.Errorf("cursor = %d, want 1", m.searchCursor)
+	}
+	mi, cmd = m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
+	m = mi.(dashboardModel)
+	if m.showSearch || cmd == nil {
+		t.Errorf("enter on a hit launches its tool and closes search: show=%v cmd=%v", m.showSearch, cmd != nil)
+	}
+}
+
+func TestDashboardSearchEscAndEmptyResult(t *testing.T) {
+	m := newDashboardModel()
+	mi, _ := m.Update(tea.KeyPressMsg{Text: "/", Code: '/'})
+	m = mi.(dashboardModel)
+	mi, cmd := m.Update(tea.KeyPressMsg{Code: tea.KeyEnter}) // empty query: nothing to run
+	m = mi.(dashboardModel)
+	if m.searchBusy || cmd != nil {
+		t.Error("empty query must not start a search")
+	}
+	mi, _ = m.Update(searchResultMsg{})
+	m = mi.(dashboardModel)
+	if !m.searchTyping || !strings.Contains(ansi.Strip(m.viewContent()), "Nothing found.") {
+		t.Errorf("no hits: typing=%v view:\n%s", m.searchTyping, ansi.Strip(m.viewContent()))
+	}
+	mi, _ = m.Update(tea.KeyPressMsg{Code: tea.KeyEscape})
+	if mi.(dashboardModel).showSearch {
+		t.Error("esc closes search")
+	}
+}

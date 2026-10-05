@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"context"
 	"fmt"
 	"image/color"
 	"os"
@@ -182,10 +183,18 @@ type dashboardModel struct {
 	lastClick   int     // card of the previous left click, for double-click → launch
 	lastClickAt time.Time
 	showHelp    bool // "?" toggles the key reference popup
-	now         time.Time
-	actionMsg   string // result of the last "x" quick action, cleared on next action/refresh
-	actionBusy  bool
-	syncFailed  []string // syncableTools entries whose step errored, accumulated across a sync-all run
+
+	showSearch   bool // "/" opens the cross-tool search (see search.go)
+	searchInput  textinput.Model
+	searchTyping bool // true while the query field has focus, false while browsing results
+	searchBusy   bool
+	searchRan    bool
+	searchHits   []SearchHit
+	searchCursor int
+	now          time.Time
+	actionMsg    string // result of the last "x" quick action, cleared on next action/refresh
+	actionBusy   bool
+	syncFailed   []string // syncableTools entries whose step errored, accumulated across a sync-all run
 
 	showAgenda   bool // "a" toggles between the card grid and the agenda view
 	agendaLoad   bool
@@ -205,7 +214,12 @@ func newDashboardModel() dashboardModel {
 	ti.CharLimit = 200
 	ti.SetWidth(50)
 
-	return dashboardModel{now: time.Now(), width: 80, settingsInput: ti, hover: -1, lastClick: -1, loading: true}
+	si := textinput.New()
+	si.Placeholder = "search tasks, events, notes, mail, budget, diary, time, habits…"
+	si.CharLimit = 120
+	si.SetWidth(60)
+
+	return dashboardModel{now: time.Now(), width: 80, settingsInput: ti, searchInput: si, hover: -1, lastClick: -1, loading: true}
 }
 
 // cardsLoadedMsg carries every card's status, fetched in parallel off the UI
@@ -299,6 +313,15 @@ func (m dashboardModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 
+	case searchResultMsg:
+		m.searchBusy, m.searchRan = false, true
+		m.searchHits, m.searchCursor = msg.hits, 0
+		m.searchTyping = len(msg.hits) == 0 // nothing to browse → keep typing
+		if m.searchTyping {
+			m.searchInput.Focus()
+		}
+		return m, nil
+
 	case cardsLoadedMsg:
 		m.values = msg.values
 		for i := range m.loaded {
@@ -319,6 +342,9 @@ func (m dashboardModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.showSettings {
 			return m.updateSettings(msg)
 		}
+		if m.showSearch {
+			return m.updateSearch(msg)
+		}
 		if m.showHelp {
 			// any key closes the popup; ctrl+c still quits
 			m.showHelp = false
@@ -330,6 +356,15 @@ func (m dashboardModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		switch msg.String() {
 		case "?":
 			m.showHelp = true
+			return m, nil
+		case "/":
+			if m.showAgenda {
+				return m, nil
+			}
+			m.showSearch, m.searchTyping = true, true
+			m.searchRan, m.searchHits, m.searchCursor = false, nil, 0
+			m.searchInput.SetValue("")
+			m.searchInput.Focus()
 			return m, nil
 		case "ctrl+c", "q", "esc":
 			return m, tea.Quit
@@ -750,6 +785,9 @@ func (m dashboardModel) viewContent() string {
 	if m.showSettings {
 		return m.renderSettings()
 	}
+	if m.showSearch {
+		return m.renderSearch()
+	}
 	if m.showHelp {
 		return overlay.Center(m.gridContent(), m.renderHelpPopup(), m.width, m.height, 0)
 	}
@@ -768,6 +806,7 @@ func (m dashboardModel) renderHelpPopup() string {
 		Row("s", "sync all tools").
 		Row("r", "reload now (auto every 30s and on window focus)").
 		Row("a", "today's agenda").
+		Row("/", "search across all tools").
 		Row("L", "license settings").
 		Section("Other").
 		Row("?", "this help").
@@ -859,9 +898,9 @@ func (m dashboardModel) gridContent() string {
 			loadHint = "  " + dashMutedStyle.Render("↻ refreshing…")
 		}
 		footer = fmt.Sprintf(
-			"%s move  %s open%s  %s sync  %s agenda  %s help  %s quit",
+			"%s move  %s open%s  %s search  %s sync  %s agenda  %s help  %s quit",
 			dashKeyStyle.Render("↑↓←→"), dashKeyStyle.Render("enter"), xHint,
-			dashKeyStyle.Render("s"), dashKeyStyle.Render("a"),
+			dashKeyStyle.Render("/"), dashKeyStyle.Render("s"), dashKeyStyle.Render("a"),
 			dashKeyStyle.Render("?"), dashKeyStyle.Render("q"),
 		) + loadHint
 	}
@@ -874,4 +913,111 @@ func runDashboard(_ *cobra.Command, _ []string) error {
 	p := tea.NewProgram(newDashboardModel())
 	_, err := p.Run()
 	return err
+}
+
+// ── cross-tool search ─────────────────────────────────────────────────────────
+
+type searchResultMsg struct{ hits []SearchHit }
+
+func runSearchCmd(q string) tea.Cmd {
+	return func() tea.Msg {
+		return searchResultMsg{hits: searchAll(context.Background(), q, 5, time.Now())}
+	}
+}
+
+func (m dashboardModel) updateSearch(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
+	key := msg.String()
+	if key == "ctrl+c" {
+		return m, tea.Quit
+	}
+	if key == "esc" {
+		m.showSearch = false
+		m.searchInput.Blur()
+		return m, nil
+	}
+	if m.searchTyping {
+		switch key {
+		case "enter":
+			q := strings.TrimSpace(m.searchInput.Value())
+			if q == "" || m.searchBusy {
+				return m, nil
+			}
+			m.searchBusy = true
+			return m, runSearchCmd(q)
+		case "down":
+			if len(m.searchHits) > 0 {
+				m.searchTyping = false
+				m.searchInput.Blur()
+			}
+			return m, nil
+		}
+		var cmd tea.Cmd
+		m.searchInput, cmd = m.searchInput.Update(msg)
+		return m, cmd
+	}
+	// browsing results
+	switch key {
+	case "j", "down":
+		if m.searchCursor < len(m.searchHits)-1 {
+			m.searchCursor++
+		}
+	case "k", "up":
+		if m.searchCursor > 0 {
+			m.searchCursor--
+		} else {
+			m.searchTyping = true
+			return m, m.searchInput.Focus()
+		}
+	case "/", "tab":
+		m.searchTyping = true
+		return m, m.searchInput.Focus()
+	case "enter":
+		if m.searchCursor < len(m.searchHits) {
+			m.showSearch = false
+			return m, m.launch(m.searchHits[m.searchCursor].Tool)
+		}
+	}
+	return m, nil
+}
+
+func (m dashboardModel) renderSearch() string {
+	var b strings.Builder
+	b.WriteString("\n" + m.renderHeader() + "\n\n")
+	b.WriteString(rowIndent + dashKeyStyle.Render("/ ") + m.searchInput.View() + "\n\n")
+	switch {
+	case m.searchBusy:
+		b.WriteString(rowIndent + dashMutedStyle.Render("searching…") + "\n")
+	case m.searchRan && len(m.searchHits) == 0:
+		b.WriteString(rowIndent + dashMutedStyle.Render("Nothing found.") + "\n")
+	default:
+		last := ""
+		for i, h := range m.searchHits {
+			if h.Tool != last {
+				b.WriteString("\n" + rowIndent + h.Icon + " " + dashKeyStyle.Render(h.Tool) + "\n")
+				last = h.Tool
+			}
+			line := truncate(h.Title, max(m.width-16, 20))
+			if h.When != "" {
+				line += dashMutedStyle.Render("  " + h.When)
+			}
+			if h.Snippet != "" {
+				line += dashMutedStyle.Render("  …" + truncate(h.Snippet, max(m.width/3, 12)) + "…")
+			}
+			prefix := "    "
+			if !m.searchTyping && i == m.searchCursor {
+				prefix = "  ▸ "
+				line = lipgloss.NewStyle().Bold(true).Render(line)
+			}
+			b.WriteString(rowIndent + prefix + line + "\n")
+		}
+	}
+	if m.height > 0 {
+		for lines := strings.Count(b.String(), "\n"); lines < m.height-2; lines++ {
+			b.WriteString("\n")
+		}
+	}
+	foot := fmt.Sprintf("%s search  %s results  %s open tool  %s back",
+		dashKeyStyle.Render("enter"), dashKeyStyle.Render("↑↓"), dashKeyStyle.Render("enter"), dashKeyStyle.Render("esc"))
+	b.WriteString(rowIndent + dashFootStyle.Render(foot) + "\n")
+	return b.String()
 }
