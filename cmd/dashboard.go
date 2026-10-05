@@ -6,11 +6,14 @@ import (
 	"os"
 	"os/exec"
 	"strings"
+	"sync"
 	"time"
 
 	"charm.land/bubbles/v2/textinput"
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
+	"github.com/aeon022/missionctl-core/keymap"
+	"github.com/aeon022/missionctl-core/overlay"
 	"github.com/aeon022/missionctl-core/theme"
 	"github.com/charmbracelet/colorprofile"
 	"github.com/spf13/cobra"
@@ -173,6 +176,12 @@ type dashboardModel struct {
 	height      int
 	values      [8]cardStatus
 	lastRefresh time.Time
+	loading     bool    // a refresh is in flight; the UI stays responsive meanwhile
+	loaded      [8]bool // per card: has a value arrived yet (else it shows "loading…")
+	hover       int     // card under the mouse, -1 for none
+	lastClick   int     // card of the previous left click, for double-click → launch
+	lastClickAt time.Time
+	showHelp    bool // "?" toggles the key reference popup
 	now         time.Time
 	actionMsg   string // result of the last "x" quick action, cleared on next action/refresh
 	actionBusy  bool
@@ -196,17 +205,42 @@ func newDashboardModel() dashboardModel {
 	ti.CharLimit = 200
 	ti.SetWidth(50)
 
-	m := dashboardModel{now: time.Now(), width: 80, settingsInput: ti}
-	m.refresh()
-	return m
+	return dashboardModel{now: time.Now(), width: 80, settingsInput: ti, hover: -1, lastClick: -1, loading: true}
 }
 
-func (m *dashboardModel) refresh() {
-	m.now = time.Now()
-	for i, c := range dashboardCards {
-		m.values[i] = c.value(m.now)
+// cardsLoadedMsg carries every card's status, fetched in parallel off the UI
+// goroutine: each value() shells out to a tool's --json, and doing eight of
+// those one after another inside Update froze the dashboard at startup and
+// every 30 seconds.
+type cardsLoadedMsg struct {
+	values [8]cardStatus
+	at     time.Time
+}
+
+func refreshCmd() tea.Cmd {
+	return func() tea.Msg {
+		now := time.Now()
+		var vals [8]cardStatus
+		var wg sync.WaitGroup
+		for i, c := range dashboardCards {
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				vals[i] = c.value(now)
+			}()
+		}
+		wg.Wait()
+		return cardsLoadedMsg{values: vals, at: now}
 	}
-	m.lastRefresh = m.now
+}
+
+// startRefresh kicks off a background refresh unless one is already running.
+func (m *dashboardModel) startRefresh() tea.Cmd {
+	if m.loading {
+		return nil
+	}
+	m.loading = true
+	return refreshCmd()
 }
 
 func tickEvery(d time.Duration) tea.Cmd {
@@ -214,7 +248,7 @@ func tickEvery(d time.Duration) tea.Cmd {
 }
 
 func (m dashboardModel) Init() tea.Cmd {
-	return tickEvery(time.Second)
+	return tea.Batch(tickEvery(time.Second), refreshCmd())
 }
 
 func (m dashboardModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
@@ -227,19 +261,57 @@ func (m dashboardModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.width, m.height = msg.Width, msg.Height
 		return m, nil
 
-	case tea.MouseMsg: // wheel/click/motion — all swallowed, see below
+	case tea.MouseMotionMsg:
+		m.hover = -1
+		if !m.showAgenda && !m.showSettings && !m.showHelp {
+			m.hover = m.cardAt(msg.X, msg.Y)
+		}
+		return m, nil
+
+	case tea.MouseClickMsg:
+		if msg.Button != tea.MouseLeft || m.showAgenda || m.showSettings || m.showHelp {
+			return m, nil
+		}
+		i := m.cardAt(msg.X, msg.Y)
+		if i < 0 {
+			return m, nil
+		}
+		now := time.Now()
+		if i == m.lastClick && now.Sub(m.lastClickAt) < 400*time.Millisecond {
+			m.lastClick = -1 // consumed, so a third click starts fresh
+			return m, m.launch(dashboardCards[i].tool)
+		}
+		m.cursor, m.lastClick, m.lastClickAt = i, i, now
+		return m, nil
+
+	case tea.MouseMsg: // wheel etc. — swallowed on purpose
 		// The card grid always fits on screen — there's nothing to scroll.
 		// Without mouse capture enabled, a trackpad/wheel scroll gets
 		// translated by the terminal into arrow-key escapes instead, which
-		// used to jump the card cursor around unintentionally. Capturing
-		// mouse input turns that into a real MouseMsg here, which is simply
-		// swallowed — scroll no longer does anything, on purpose.
+		// used to jump the card cursor around unintentionally.
+		return m, nil
+
+	case tea.FocusMsg:
+		// Coming back from another window (or a tool we launched): the data
+		// is probably stale, so reload — but not on every focus flicker.
+		if m.now.Sub(m.lastRefresh) > 5*time.Second {
+			return m, m.startRefresh()
+		}
+		return m, nil
+
+	case cardsLoadedMsg:
+		m.values = msg.values
+		for i := range m.loaded {
+			m.loaded[i] = true
+		}
+		m.loading = false
+		m.lastRefresh = msg.at
 		return m, nil
 
 	case tickMsg:
 		m.now = time.Time(msg)
 		if m.now.Sub(m.lastRefresh) >= 30*time.Second {
-			m.refresh()
+			return m, tea.Batch(m.startRefresh(), tickEvery(time.Second))
 		}
 		return m, tickEvery(time.Second)
 
@@ -247,7 +319,18 @@ func (m dashboardModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.showSettings {
 			return m.updateSettings(msg)
 		}
+		if m.showHelp {
+			// any key closes the popup; ctrl+c still quits
+			m.showHelp = false
+			if msg.String() == "ctrl+c" {
+				return m, tea.Quit
+			}
+			return m, nil
+		}
 		switch msg.String() {
+		case "?":
+			m.showHelp = true
+			return m, nil
 		case "ctrl+c", "q", "esc":
 			return m, tea.Quit
 		case "j", "down":
@@ -275,8 +358,7 @@ func (m dashboardModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.agendaLoad = true
 				return m, loadAgendaCmd()
 			}
-			m.refresh()
-			return m, nil
+			return m, m.startRefresh()
 		case "a":
 			m.showAgenda = !m.showAgenda
 			if m.showAgenda {
@@ -330,8 +412,7 @@ func (m dashboardModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case launchErrMsg:
 		m.err = msg.err
-		m.refresh()
-		return m, nil
+		return m, m.startRefresh()
 
 	case quickActionMsg:
 		m.actionBusy = false
@@ -339,7 +420,7 @@ func (m dashboardModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.actionMsg = "✗ " + msg.err.Error()
 		} else {
 			m.actionMsg = "✓ " + msg.result
-			m.refresh()
+			return m, m.startRefresh()
 		}
 		return m, nil
 
@@ -358,8 +439,7 @@ func (m dashboardModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		} else {
 			m.actionMsg = "✓ synced " + strings.Join(syncableTools, ", ")
 		}
-		m.refresh()
-		return m, nil
+		return m, m.startRefresh()
 
 	case agendaLoadedMsg:
 		m.agendaLoad = false
@@ -474,6 +554,32 @@ func (m dashboardModel) cardWidth() int {
 	return w
 }
 
+// cardAt maps a terminal cell to the card drawn there (-1 for none), using the
+// same layout viewContent produces: a 4-line header block, then rows of
+// cardCols cards whose height is that of the tallest card in the row.
+func (m dashboardModel) cardAt(x, y int) int {
+	const gridTop = 4 // blank, banner, rule, blank
+	w := m.cardWidth()
+	top := gridTop
+	for row := 0; row < len(dashboardCards); row += cardCols {
+		h := 0
+		for col := 0; col < cardCols && row+col < len(dashboardCards); col++ {
+			h = max(h, lipgloss.Height(m.renderCard(row+col)))
+		}
+		if y >= top && y < top+h {
+			for col := 0; col < cardCols && row+col < len(dashboardCards); col++ {
+				x0 := len(rowIndent) + col*(w+len(cardGap))
+				if x >= x0 && x < x0+w {
+					return row + col
+				}
+			}
+			return -1
+		}
+		top += h
+	}
+	return -1
+}
+
 func (m dashboardModel) renderCard(i int) string {
 	c := dashboardCards[i]
 	w := m.cardWidth()
@@ -493,6 +599,8 @@ func (m dashboardModel) renderCard(i int) string {
 	if selected {
 		border = lipgloss.ThickBorder()
 		titleStyle = titleStyle.Underline(true)
+	} else if i == m.hover {
+		border = lipgloss.DoubleBorder()
 	}
 
 	keyBadge := lipgloss.NewStyle().Foreground(dashSubtle).Render("[" + c.key + "]")
@@ -512,6 +620,9 @@ func (m dashboardModel) renderCard(i int) string {
 	// alongside the one-line counts already there. Styled dimmer than the
 	// summary so the at-a-glance number stays the visual anchor.
 	value := m.values[i]
+	if !m.loaded[i] {
+		value.text = "– loading…"
+	}
 	summaryLine, detailLine, _ := strings.Cut(value.text, "\n")
 
 	// No Foreground set here on purpose — this is the primary card value
@@ -631,6 +742,7 @@ func (m dashboardModel) View() tea.View {
 	// v1's WithAltScreen/WithMouseCellMotion Program options are per-View fields in v2.
 	v.AltScreen = true
 	v.MouseMode = tea.MouseModeCellMotion
+	v.ReportFocus = true // FocusMsg → reload stale data when the window regains focus
 	return v
 }
 
@@ -638,7 +750,34 @@ func (m dashboardModel) viewContent() string {
 	if m.showSettings {
 		return m.renderSettings()
 	}
+	if m.showHelp {
+		return overlay.Center(m.gridContent(), m.renderHelpPopup(), m.width, m.height, 0)
+	}
+	return m.gridContent()
+}
 
+func (m dashboardModel) renderHelpPopup() string {
+	h := keymap.Bare().
+		Section("Navigate").
+		Row("↑↓←→ / hjkl", "move between cards").
+		Row("1-8", "open that tool").
+		Row("enter", "open the selected tool").
+		Row("click / double-click", "select / open a card").
+		Section("Act").
+		Row("x", "quick action on the card (complete task, stop timer, check habit)").
+		Row("s", "sync all tools").
+		Row("r", "reload now (auto every 30s and on window focus)").
+		Row("a", "today's agenda").
+		Row("L", "license settings").
+		Section("Other").
+		Row("?", "this help").
+		Row("q / esc", "quit")
+	return lipgloss.NewStyle().
+		Border(lipgloss.RoundedBorder()).BorderForeground(dashSubtle).
+		Padding(1, 2).Render(h.String())
+}
+
+func (m dashboardModel) gridContent() string {
 	var b strings.Builder
 
 	b.WriteString("\n" + m.renderHeader() + "\n\n")
@@ -715,17 +854,16 @@ func (m dashboardModel) viewContent() string {
 		if dashboardCards[m.cursor].action != nil {
 			xHint = fmt.Sprintf("  %s quick action", dashKeyStyle.Render("x"))
 		}
+		loadHint := ""
+		if m.loading {
+			loadHint = "  " + dashMutedStyle.Render("↻ refreshing…")
+		}
 		footer = fmt.Sprintf(
-			"%s/%s row  %s/%s column  %s or number jump in%s  %s refresh  %s sync all  %s agenda  %s license  %s quit",
-			dashKeyStyle.Render("↑"), dashKeyStyle.Render("↓"),
-			dashKeyStyle.Render("←"), dashKeyStyle.Render("→"),
-			dashKeyStyle.Render("enter"), xHint,
-			dashKeyStyle.Render("r"),
-			dashKeyStyle.Render("s"),
-			dashKeyStyle.Render("a"),
-			dashKeyStyle.Render("L"),
-			dashKeyStyle.Render("q"),
-		)
+			"%s move  %s open%s  %s sync  %s agenda  %s help  %s quit",
+			dashKeyStyle.Render("↑↓←→"), dashKeyStyle.Render("enter"), xHint,
+			dashKeyStyle.Render("s"), dashKeyStyle.Render("a"),
+			dashKeyStyle.Render("?"), dashKeyStyle.Render("q"),
+		) + loadHint
 	}
 	b.WriteString(rowIndent + dashFootStyle.Render(footer) + "\n")
 

@@ -3,6 +3,7 @@ package cmd
 import (
 	"strings"
 	"testing"
+	"time"
 
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
@@ -106,5 +107,111 @@ func TestDashboardUnmappedKeyIsNoop(t *testing.T) {
 	}
 	if cmd != nil {
 		t.Error("expected no command for an unmapped key")
+	}
+}
+
+func TestDashboardStartsWithoutBlockingAndShowsLoading(t *testing.T) {
+	m := newDashboardModel()
+	if !m.loading {
+		t.Error("a fresh dashboard must be loading; the constructor must not shell out synchronously")
+	}
+	if out := ansi.Strip(m.viewContent()); !strings.Contains(out, "loading…") {
+		t.Errorf("cards without data should say loading…, got:\n%s", out)
+	}
+}
+
+func TestDashboardCardsLoadedFillsValues(t *testing.T) {
+	m := newDashboardModel()
+	var vals [8]cardStatus
+	vals[0] = cardStatus{text: "3 open\nnext: Steuer"}
+	mi, _ := m.Update(cardsLoadedMsg{values: vals, at: time.Now()})
+	m = mi.(dashboardModel)
+	if m.loading || !m.loaded[0] {
+		t.Fatalf("loading=%v loaded[0]=%v after cardsLoadedMsg", m.loading, m.loaded[0])
+	}
+	out := ansi.Strip(m.viewContent())
+	if !strings.Contains(out, "3 open") || strings.Contains(out, "loading…") {
+		t.Errorf("loaded values not rendered (or still loading):\n%s", out)
+	}
+}
+
+func TestDashboardRefreshNotStartedTwice(t *testing.T) {
+	m := newDashboardModel() // loading already
+	if cmd := m.startRefresh(); cmd != nil {
+		t.Error("startRefresh while a refresh is running must be a no-op")
+	}
+	m.loading = false
+	if cmd := m.startRefresh(); cmd == nil || !m.loading {
+		t.Error("startRefresh when idle must start one")
+	}
+}
+
+func TestDashboardFocusReloadsOnlyWhenStale(t *testing.T) {
+	m := newDashboardModel()
+	m.loading = false
+	m.lastRefresh = time.Now()
+	m.now = time.Now()
+	if _, cmd := m.Update(tea.FocusMsg{}); cmd != nil {
+		t.Error("focus right after a refresh must not reload")
+	}
+	m.lastRefresh = time.Now().Add(-time.Minute)
+	m.now = time.Now()
+	if _, cmd := m.Update(tea.FocusMsg{}); cmd == nil {
+		t.Error("focus with stale data must reload")
+	}
+}
+
+func TestDashboardClickSelectsAndDoubleClickLaunches(t *testing.T) {
+	m := newDashboardModel()
+	m.width, m.height = 100, 40
+	w := m.cardWidth()
+	// second column, first row: inside the card at index 1
+	x, y := len(rowIndent)+w+len(cardGap)+2, 5
+	if got := m.cardAt(x, y); got != 1 {
+		t.Fatalf("cardAt(%d,%d) = %d, want 1", x, y, got)
+	}
+	if got := m.cardAt(0, 0); got != -1 {
+		t.Errorf("header area hit a card: %d", got)
+	}
+	click := tea.MouseClickMsg{Button: tea.MouseLeft, X: x, Y: y}
+	mi, cmd := m.Update(click)
+	m = mi.(dashboardModel)
+	if m.cursor != 1 || cmd != nil {
+		t.Fatalf("first click: cursor=%d cmd=%v, want select only", m.cursor, cmd != nil)
+	}
+	if _, cmd = m.Update(click); cmd == nil {
+		t.Error("second quick click on the same card must launch it")
+	}
+}
+
+func TestDashboardHoverTracksMouse(t *testing.T) {
+	m := newDashboardModel()
+	m.width = 100
+	x, y := len(rowIndent)+2, 5
+	mi, _ := m.Update(tea.MouseMotionMsg{X: x, Y: y})
+	if got := mi.(dashboardModel).hover; got != 0 {
+		t.Errorf("hover = %d, want 0", got)
+	}
+	mi, _ = mi.Update(tea.MouseMotionMsg{X: 0, Y: 0})
+	if got := mi.(dashboardModel).hover; got != -1 {
+		t.Errorf("hover off the grid = %d, want -1", got)
+	}
+}
+
+func TestDashboardHelpPopup(t *testing.T) {
+	m := newDashboardModel()
+	m.width, m.height = 100, 40
+	mi, _ := m.Update(tea.KeyPressMsg{Text: "?", Code: '?'})
+	m = mi.(dashboardModel)
+	if !m.showHelp {
+		t.Fatal("? must open help")
+	}
+	if out := ansi.Strip(m.viewContent()); !strings.Contains(out, "sync all tools") {
+		t.Errorf("help popup not rendered:\n%s", out)
+	}
+	mi, cmd := m.Update(tea.KeyPressMsg{Text: "x", Code: 'x'})
+	m = mi.(dashboardModel)
+	if m.showHelp || cmd != nil {
+		t.Errorf("any key closes help without acting: showHelp=%v cmd=%v", m.showHelp, cmd != nil)
 	}
 }
