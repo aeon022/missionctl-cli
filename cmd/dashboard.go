@@ -30,7 +30,9 @@ type dashboardCard struct {
 	action func() (string, error) // "x" quick action; nil = none for this card
 }
 
-var dashboardCards = []dashboardCard{
+// allDashboardCards is every card the dashboard knows; dashboardCards is the
+// subset/order the user chose in dashboard.yaml (default: all).
+var allDashboardCards = []dashboardCard{
 	{"1", "✓", "Tasks", "taskctl", lipgloss.Color("39"), func(_ time.Time) cardStatus { return taskStatus() }, quickCompleteTask},
 	{"2", "📅", "Calendar", "calctl", lipgloss.Color("42"), calStatus, nil},
 	{"3", "⏱", "Timer", "timectl", lipgloss.Color("221"), timerStatus, quickStopTimer},
@@ -40,6 +42,8 @@ var dashboardCards = []dashboardCard{
 	{"7", "📝", "Notes", "notectl", lipgloss.Color("135"), noteStatus, nil},
 	{"8", "✉", "Mail", "mailctl", lipgloss.Color("33"), func(_ time.Time) cardStatus { return mailStatus() }, nil},
 }
+
+var dashboardCards = filterCards(allDashboardCards, loadCardIDs())
 
 // quickCompleteTask/quickCheckHabit/quickStopTimer re-fetch the same --json
 // data their card's status function already showed, act on the first
@@ -175,12 +179,12 @@ type dashboardModel struct {
 	err         error
 	width       int
 	height      int
-	values      [8]cardStatus
+	values      []cardStatus
 	lastRefresh time.Time
-	loading     bool    // a refresh is in flight; the UI stays responsive meanwhile
-	loaded      [8]bool // per card: has a value arrived yet (else it shows "loading…")
-	hover       int     // card under the mouse, -1 for none
-	lastClick   int     // card of the previous left click, for double-click → launch
+	loading     bool   // a refresh is in flight; the UI stays responsive meanwhile
+	loaded      []bool // per card: has a value arrived yet (else it shows "loading…")
+	hover       int    // card under the mouse, -1 for none
+	lastClick   int    // card of the previous left click, for double-click → launch
 	lastClickAt time.Time
 	showHelp    bool // "?" toggles the key reference popup
 
@@ -219,7 +223,7 @@ func newDashboardModel() dashboardModel {
 	si.CharLimit = 120
 	si.SetWidth(60)
 
-	return dashboardModel{now: time.Now(), width: 80, settingsInput: ti, searchInput: si, hover: -1, lastClick: -1, loading: true}
+	return dashboardModel{values: make([]cardStatus, len(dashboardCards)), loaded: make([]bool, len(dashboardCards)), now: time.Now(), width: 80, settingsInput: ti, searchInput: si, hover: -1, lastClick: -1, loading: true}
 }
 
 // cardsLoadedMsg carries every card's status, fetched in parallel off the UI
@@ -227,14 +231,14 @@ func newDashboardModel() dashboardModel {
 // those one after another inside Update froze the dashboard at startup and
 // every 30 seconds.
 type cardsLoadedMsg struct {
-	values [8]cardStatus
+	values []cardStatus
 	at     time.Time
 }
 
 func refreshCmd() tea.Cmd {
 	return func() tea.Msg {
 		now := time.Now()
-		var vals [8]cardStatus
+		vals := make([]cardStatus, len(dashboardCards))
 		var wg sync.WaitGroup
 		for i, c := range dashboardCards {
 			wg.Add(1)
@@ -798,7 +802,7 @@ func (m dashboardModel) renderHelpPopup() string {
 	h := keymap.Bare().
 		Section("Navigate").
 		Row("↑↓←→ / hjkl", "move between cards").
-		Row("1-8", "open that tool").
+		Row("1-9", "open that tool").
 		Row("enter", "open the selected tool").
 		Row("click / double-click", "select / open a card").
 		Section("Act").

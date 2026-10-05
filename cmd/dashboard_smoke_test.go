@@ -122,7 +122,7 @@ func TestDashboardStartsWithoutBlockingAndShowsLoading(t *testing.T) {
 
 func TestDashboardCardsLoadedFillsValues(t *testing.T) {
 	m := newDashboardModel()
-	var vals [8]cardStatus
+	vals := make([]cardStatus, len(dashboardCards))
 	vals[0] = cardStatus{text: "3 open\nnext: Steuer"}
 	mi, _ := m.Update(cardsLoadedMsg{values: vals, at: time.Now()})
 	m = mi.(dashboardModel)
@@ -284,5 +284,47 @@ func TestDashboardSearchEscAndEmptyResult(t *testing.T) {
 	mi, _ = m.Update(tea.KeyPressMsg{Code: tea.KeyEscape})
 	if mi.(dashboardModel).showSearch {
 		t.Error("esc closes search")
+	}
+}
+
+func TestFilterCardsOrderUnknownAndRenumber(t *testing.T) {
+	got := filterCards(allDashboardCards, []string{"Habits", "nonsense", "tasks", "habits"})
+	if len(got) != 2 || got[0].label != "Habits" || got[1].label != "Tasks" {
+		t.Fatalf("order/dedup/unknown: %+v", got)
+	}
+	if got[0].key != "1" || got[1].key != "2" {
+		t.Errorf("keys must be renumbered to match the screen: %q %q", got[0].key, got[1].key)
+	}
+	if all := filterCards(allDashboardCards, nil); len(all) != len(allDashboardCards) {
+		t.Errorf("no list = all cards, got %d", len(all))
+	}
+	if all := filterCards(allDashboardCards, []string{"nope"}); len(all) != len(allDashboardCards) {
+		t.Error("only unknown ids must fall back to all cards, not an empty dashboard")
+	}
+}
+
+func TestDashboardWithThreeCards(t *testing.T) {
+	orig := dashboardCards
+	dashboardCards = filterCards(allDashboardCards, []string{"tasks", "habits", "notes"})
+	t.Cleanup(func() { dashboardCards = orig })
+
+	m := newDashboardModel()
+	m.width, m.height = 100, 30
+	mi, _ := m.Update(cardsLoadedMsg{values: make([]cardStatus, 3), at: time.Now()})
+	m = mi.(dashboardModel)
+	out := ansi.Strip(m.viewContent())
+	if !strings.Contains(out, "Habits") || strings.Contains(out, "Mail") || strings.Contains(out, "Budget") {
+		t.Errorf("only the chosen cards should render:\n%s", out)
+	}
+	// 3 cards in 2 columns: the last row has one card; cursor must not run past it
+	m.cursor = 2
+	mi, _ = m.Update(tea.KeyPressMsg{Text: "l", Code: 'l'})
+	if got := mi.(dashboardModel).cursor; got != 2 {
+		t.Errorf("cursor ran off the last card: %d", got)
+	}
+	// number keys address the visible cards
+	mi, cmd := m.Update(tea.KeyPressMsg{Text: "2", Code: '2'})
+	if mi.(dashboardModel).cursor != 1 || cmd == nil {
+		t.Error("2 must jump to the second visible card (habits)")
 	}
 }
