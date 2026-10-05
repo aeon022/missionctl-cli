@@ -187,6 +187,9 @@ func calStatus(now time.Time) cardStatus {
 		return cardStatus{text: "no events today"}
 	}
 	summary := fmt.Sprintf("%d events today", resp.Count)
+	if resp.Count == 1 {
+		summary = "1 event today"
+	}
 	for _, e := range resp.Data {
 		if e.StartTime.After(now) {
 			return cardStatus{text: fmt.Sprintf("%s\nnext: %s at %s", summary, e.Title, e.StartTime.Format("15:04"))}
