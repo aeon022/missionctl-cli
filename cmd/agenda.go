@@ -2,10 +2,11 @@ package cmd
 
 import (
 	"fmt"
+	"image/color"
 	"sort"
 	"time"
 
-	"github.com/charmbracelet/lipgloss"
+	"charm.land/lipgloss/v2"
 	"github.com/spf13/cobra"
 )
 
@@ -25,7 +26,7 @@ type agendaItem struct {
 	when    time.Time
 	hasTime bool
 	icon    string
-	color   lipgloss.Color
+	color   color.Color
 	text    string
 }
 
@@ -135,19 +136,19 @@ func runAgenda(_ *cobra.Command, _ []string) error {
 	headerStyle := lipgloss.NewStyle().Bold(true)
 	timeStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("245")).Width(6)
 
-	fmt.Println()
-	fmt.Printf("  %s\n", headerStyle.Render("Today's agenda — "+now.Format("Mon Jan 02")))
-	fmt.Println()
+	fmt.Fprintln(cliOut)
+	fmt.Fprintf(cliOut, "  %s\n", headerStyle.Render("Today's agenda — "+now.Format("Mon Jan 02")))
+	fmt.Fprintln(cliOut)
 
 	if len(timed) == 0 && len(allDay) == 0 {
-		fmt.Println("  Nothing scheduled today.")
-		fmt.Println()
+		fmt.Fprintln(cliOut, "  Nothing scheduled today.")
+		fmt.Fprintln(cliOut)
 		return nil
 	}
 
 	printItem := func(it agendaItem, timeLabel string) {
 		iconStyle := lipgloss.NewStyle().Foreground(it.color)
-		fmt.Printf("  %s %s  %s\n", timeStyle.Render(timeLabel), iconStyle.Render(it.icon), it.text)
+		fmt.Fprintf(cliOut, "  %s %s  %s\n", timeStyle.Render(timeLabel), iconStyle.Render(it.icon), it.text)
 	}
 
 	for _, it := range allDay {
@@ -157,7 +158,7 @@ func runAgenda(_ *cobra.Command, _ []string) error {
 		printItem(it, it.when.Format("15:04"))
 	}
 
-	fmt.Println()
+	fmt.Fprintln(cliOut)
 	return nil
 }
 

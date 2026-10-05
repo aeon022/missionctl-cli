@@ -4,8 +4,9 @@ import (
 	"strings"
 	"testing"
 
-	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
+	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
+	"github.com/charmbracelet/x/ansi"
 )
 
 func TestTruncateRespectsDisplayWidthNotRuneCount(t *testing.T) {
@@ -25,7 +26,7 @@ func TestTruncateRespectsDisplayWidthNotRuneCount(t *testing.T) {
 
 func TestDashboardViewRenders(t *testing.T) {
 	m := newDashboardModel()
-	out := m.View()
+	out := ansi.Strip(m.viewContent()) // v2 styles always emit ANSI
 	if !strings.Contains(out, "Tasks") || !strings.Contains(out, "Mail") {
 		t.Errorf("expected all rows in view, got:\n%s", out)
 	}
@@ -35,22 +36,22 @@ func TestDashboardCursorMovement(t *testing.T) {
 	// Cards form a 2-column grid, so j/down must move a full row (+cardCols)
 	// and l/right must move one column (+1) — not the other way around.
 	m := newDashboardModel()
-	mi, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("j")})
+	mi, _ := m.Update(tea.KeyPressMsg{Text: "j", Code: []rune("j")[0]})
 	m = mi.(dashboardModel)
 	if m.cursor != cardCols {
 		t.Errorf("expected cursor %d after j (down one row), got %d", cardCols, m.cursor)
 	}
-	mi, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("k")})
+	mi, _ = m.Update(tea.KeyPressMsg{Text: "k", Code: []rune("k")[0]})
 	m = mi.(dashboardModel)
 	if m.cursor != 0 {
 		t.Errorf("expected cursor 0 after k (up one row), got %d", m.cursor)
 	}
-	mi, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("l")})
+	mi, _ = m.Update(tea.KeyPressMsg{Text: "l", Code: []rune("l")[0]})
 	m = mi.(dashboardModel)
 	if m.cursor != 1 {
 		t.Errorf("expected cursor 1 after l (right one column), got %d", m.cursor)
 	}
-	mi, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("h")})
+	mi, _ = m.Update(tea.KeyPressMsg{Text: "h", Code: []rune("h")[0]})
 	m = mi.(dashboardModel)
 	if m.cursor != 0 {
 		t.Errorf("expected cursor 0 after h (left one column), got %d", m.cursor)
@@ -61,7 +62,7 @@ func TestDashboardCursorMovementStaysInBounds(t *testing.T) {
 	// l/right at the last column of a row must not wrap into the next row.
 	m := newDashboardModel()
 	m.cursor = 1 // last column of row 0
-	mi, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("l")})
+	mi, _ := m.Update(tea.KeyPressMsg{Text: "l", Code: []rune("l")[0]})
 	m = mi.(dashboardModel)
 	if m.cursor != 1 {
 		t.Errorf("expected cursor to stay at 1 (right edge of row), got %d", m.cursor)
@@ -69,7 +70,7 @@ func TestDashboardCursorMovementStaysInBounds(t *testing.T) {
 
 	// h/left at the first column of a row must not wrap into the previous row.
 	m.cursor = 2 // first column of row 1
-	mi, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("h")})
+	mi, _ = m.Update(tea.KeyPressMsg{Text: "h", Code: []rune("h")[0]})
 	m = mi.(dashboardModel)
 	if m.cursor != 2 {
 		t.Errorf("expected cursor to stay at 2 (left edge of row), got %d", m.cursor)
@@ -78,7 +79,7 @@ func TestDashboardCursorMovementStaysInBounds(t *testing.T) {
 
 func TestDashboardQuit(t *testing.T) {
 	m := newDashboardModel()
-	_, cmd := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("q")})
+	_, cmd := m.Update(tea.KeyPressMsg{Text: "q", Code: []rune("q")[0]})
 	if cmd == nil {
 		t.Fatal("expected a command (tea.Quit) when pressing q")
 	}
@@ -86,7 +87,7 @@ func TestDashboardQuit(t *testing.T) {
 
 func TestDashboardDigitJumpsAndMovesCursor(t *testing.T) {
 	m := newDashboardModel()
-	mi, cmd := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("5")})
+	mi, cmd := m.Update(tea.KeyPressMsg{Text: "5", Code: []rune("5")[0]})
 	m = mi.(dashboardModel)
 	if m.cursor != 4 {
 		t.Errorf("expected cursor on row 4 (Budget) after pressing 5, got %d", m.cursor)
@@ -98,7 +99,7 @@ func TestDashboardDigitJumpsAndMovesCursor(t *testing.T) {
 
 func TestDashboardUnmappedKeyIsNoop(t *testing.T) {
 	m := newDashboardModel()
-	mi, cmd := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("z")})
+	mi, cmd := m.Update(tea.KeyPressMsg{Text: "z", Code: []rune("z")[0]})
 	m2 := mi.(dashboardModel)
 	if m2.cursor != m.cursor {
 		t.Error("expected cursor unchanged for an unmapped key")

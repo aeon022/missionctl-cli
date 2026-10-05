@@ -5,7 +5,7 @@ import (
 	"os/exec"
 	"strings"
 
-	"github.com/charmbracelet/lipgloss"
+	"charm.land/lipgloss/v2"
 	"github.com/spf13/cobra"
 )
 
@@ -61,23 +61,23 @@ func runLicenseActivate(cmd *cobra.Command, args []string) error {
 
 	detailStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("8"))
 
-	fmt.Println()
+	fmt.Fprintln(cliOut)
 	results := activateAll(key)
 	activated, failed, skipped := 0, 0, 0
 	for _, r := range results {
 		switch {
 		case !r.installed:
-			fmt.Printf("  %s %s  not installed, skipped\n", nameStyle.Render(r.tool), dashMark)
+			fmt.Fprintf(cliOut, "  %s %s  not installed, skipped\n", nameStyle.Render(r.tool), dashMark)
 			skipped++
 		case !r.ok:
-			fmt.Printf("  %s %s  %s\n", nameStyle.Render(r.tool), crossMark, detailStyle.Render(r.detail))
+			fmt.Fprintf(cliOut, "  %s %s  %s\n", nameStyle.Render(r.tool), crossMark, detailStyle.Render(r.detail))
 			failed++
 		default:
-			fmt.Printf("  %s %s  activated\n", nameStyle.Render(r.tool), checkMark)
+			fmt.Fprintf(cliOut, "  %s %s  activated\n", nameStyle.Render(r.tool), checkMark)
 			activated++
 		}
 	}
-	fmt.Println()
+	fmt.Fprintln(cliOut)
 
 	if failed > 0 {
 		return fmt.Errorf("%d of %d tool(s) failed to activate — double-check the key and try again", failed, activated+failed)
@@ -85,18 +85,18 @@ func runLicenseActivate(cmd *cobra.Command, args []string) error {
 	if activated == 0 {
 		return fmt.Errorf("no licensable tools are installed — run `missionctl doctor` first")
 	}
-	fmt.Printf("  Bundle unlocked on %d tool(s).\n\n", activated)
+	fmt.Fprintf(cliOut, "  Bundle unlocked on %d tool(s).\n\n", activated)
 	return nil
 }
 
 func runLicenseStatus(cmd *cobra.Command, args []string) error {
 	mutedStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("8"))
 
-	fmt.Println()
+	fmt.Fprintln(cliOut)
 	for _, r := range statusAll() {
-		fmt.Printf("  %s %s\n", nameStyle.Render(r.tool), mutedStyle.Render(r.detail))
+		fmt.Fprintf(cliOut, "  %s %s\n", nameStyle.Render(r.tool), mutedStyle.Render(r.detail))
 	}
-	fmt.Println()
+	fmt.Fprintln(cliOut)
 	return nil
 }
 

@@ -11,7 +11,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/charmbracelet/lipgloss"
+	"charm.land/lipgloss/v2"
 	"github.com/spf13/cobra"
 	_ "modernc.org/sqlite"
 )
@@ -113,15 +113,15 @@ func runStatus(_ *cobra.Command, _ []string) error {
 		if age := syncAge(tool); age != "" {
 			lines = append(lines, "synced "+age)
 		}
-		fmt.Printf("  %s %s\n", labelStyle.Render(label), lines[0])
+		fmt.Fprintf(cliOut, "  %s %s\n", labelStyle.Render(label), lines[0])
 		for _, l := range lines[1:] {
-			fmt.Printf("  %s %s\n", labelStyle.Render(""), detailStyle.Render(l))
+			fmt.Fprintf(cliOut, "  %s %s\n", labelStyle.Render(""), detailStyle.Render(l))
 		}
 	}
 
-	fmt.Println()
-	fmt.Printf("  %s\n", headerStyle.Render(fmt.Sprintf("missionctl status — %s", dateStr)))
-	fmt.Println()
+	fmt.Fprintln(cliOut)
+	fmt.Fprintf(cliOut, "  %s\n", headerStyle.Render(fmt.Sprintf("missionctl status — %s", dateStr)))
+	fmt.Fprintln(cliOut)
 
 	printStatus("Tasks", "taskctl", taskStatus())
 	printStatus("Calendar", "calctl", calStatus(now))
@@ -132,7 +132,7 @@ func runStatus(_ *cobra.Command, _ []string) error {
 	printStatus("Notes", "notectl", noteStatus(now))
 	printStatus("Mail", "mailctl", mailStatus())
 
-	fmt.Println()
+	fmt.Fprintln(cliOut)
 	return nil
 }
 

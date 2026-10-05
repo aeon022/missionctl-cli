@@ -16,30 +16,30 @@ var installCmd = &cobra.Command{
 }
 
 func runInstall(cmd *cobra.Command, args []string) error {
-	fmt.Println()
+	fmt.Fprintln(cliOut)
 	installed, failed := 0, []string{}
 
 	for _, t := range tools {
 		if !installAll {
 			if _, err := exec.LookPath(t.name); err == nil {
-				fmt.Printf("  %s %s  already installed\n", nameStyle.Render(t.name), dashMark)
+				fmt.Fprintf(cliOut, "  %s %s  already installed\n", nameStyle.Render(t.name), dashMark)
 				continue
 			}
 		}
 
 		if err := installTool(t); err != nil {
-			fmt.Printf("  %s %s  setup.sh failed: %s\n", nameStyle.Render(t.name), crossMark, err)
+			fmt.Fprintf(cliOut, "  %s %s  setup.sh failed: %s\n", nameStyle.Render(t.name), crossMark, err)
 			failed = append(failed, t.name)
 			continue
 		}
 
-		fmt.Printf("  %s %s  installed\n", nameStyle.Render(t.name), checkMark)
+		fmt.Fprintf(cliOut, "  %s %s  installed\n", nameStyle.Render(t.name), checkMark)
 		installed++
 	}
 
-	fmt.Println()
-	fmt.Printf("  %d tool(s) newly installed\n", installed)
-	fmt.Println()
+	fmt.Fprintln(cliOut)
+	fmt.Fprintf(cliOut, "  %d tool(s) newly installed\n", installed)
+	fmt.Fprintln(cliOut)
 
 	if len(failed) > 0 {
 		return fmt.Errorf("%d tool(s) failed to install: %v", len(failed), failed)

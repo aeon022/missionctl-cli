@@ -11,7 +11,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/charmbracelet/lipgloss"
+	"charm.land/lipgloss/v2"
 	"github.com/spf13/cobra"
 )
 
@@ -53,7 +53,7 @@ func runDoctor(cmd *cobra.Command, args []string) error {
 	pathStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("8"))
 	labelStyle := lipgloss.NewStyle().Width(22)
 
-	fmt.Println()
+	fmt.Fprintln(cliOut)
 
 	found := 0
 	missing := []string{}
@@ -61,7 +61,7 @@ func runDoctor(cmd *cobra.Command, args []string) error {
 	for _, t := range tools {
 		path, err := exec.LookPath(t.name)
 		if err == nil {
-			fmt.Printf("  %s %s  %s\n",
+			fmt.Fprintf(cliOut, "  %s %s  %s\n",
 				nameStyle.Render(t.name),
 				checkMark,
 				pathStyle.Render(path),
@@ -69,7 +69,7 @@ func runDoctor(cmd *cobra.Command, args []string) error {
 			found++
 		} else {
 			installCmd := fmt.Sprintf("bash ~/Developing/Projects/missionctl/%s/setup.sh", t.project)
-			fmt.Printf("  %s %s  not found — install: %s\n",
+			fmt.Fprintf(cliOut, "  %s %s  not found — install: %s\n",
 				nameStyle.Render(t.name),
 				crossMark,
 				pathStyle.Render(installCmd),
@@ -78,33 +78,33 @@ func runDoctor(cmd *cobra.Command, args []string) error {
 		}
 	}
 
-	fmt.Println()
+	fmt.Fprintln(cliOut)
 	total := len(tools)
-	fmt.Printf("  %d/%d tools installed\n", found, total)
+	fmt.Fprintf(cliOut, "  %d/%d tools installed\n", found, total)
 
-	fmt.Println()
+	fmt.Fprintln(cliOut)
 
 	for _, ev := range envVars {
 		val := os.Getenv(ev.name)
 		if val != "" {
-			fmt.Printf("  %s %s  set\n", labelStyle.Render(ev.name), checkMark)
+			fmt.Fprintf(cliOut, "  %s %s  set\n", labelStyle.Render(ev.name), checkMark)
 		} else if ev.optional {
-			fmt.Printf("  %s %s  not set (optional)\n", labelStyle.Render(ev.name), dashMark)
+			fmt.Fprintf(cliOut, "  %s %s  not set (optional)\n", labelStyle.Render(ev.name), dashMark)
 		} else {
-			fmt.Printf("  %s %s  not set\n", labelStyle.Render(ev.name), crossMark)
+			fmt.Fprintf(cliOut, "  %s %s  not set\n", labelStyle.Render(ev.name), crossMark)
 		}
 	}
 
-	fmt.Println()
+	fmt.Fprintln(cliOut)
 	checkMCPConfig(checkMark, crossMark, nameStyle, pathStyle)
 
-	fmt.Println()
+	fmt.Fprintln(cliOut)
 	checkDatabases(checkMark, dashMark, nameStyle, pathStyle)
 
-	fmt.Println()
+	fmt.Fprintln(cliOut)
 	checkDaemons(checkMark, crossMark, dashMark, nameStyle, pathStyle)
 
-	fmt.Println()
+	fmt.Fprintln(cliOut)
 
 	if len(missing) > 0 {
 		return fmt.Errorf("%d tool(s) not found: %v", len(missing), missing)
@@ -125,14 +125,14 @@ var mcpTools = func() []string {
 }()
 
 func checkMCPConfig(checkMark, crossMark string, nameStyle, pathStyle lipgloss.Style) {
-	fmt.Println("  MCP registration (~/.claude.json):")
-	fmt.Println()
+	fmt.Fprintln(cliOut, "  MCP registration (~/.claude.json):")
+	fmt.Fprintln(cliOut)
 
 	home, _ := os.UserHomeDir()
 	path := filepath.Join(home, ".claude.json")
 	data, err := os.ReadFile(path)
 	if err != nil {
-		fmt.Printf("  %s  %s\n", crossMark, pathStyle.Render("~/.claude.json not found — no MCP servers registered yet"))
+		fmt.Fprintf(cliOut, "  %s  %s\n", crossMark, pathStyle.Render("~/.claude.json not found — no MCP servers registered yet"))
 		return
 	}
 
@@ -143,7 +143,7 @@ func checkMCPConfig(checkMark, crossMark string, nameStyle, pathStyle lipgloss.S
 		} `json:"projects"`
 	}
 	if err := json.Unmarshal(data, &cfg); err != nil {
-		fmt.Printf("  %s  %s\n", crossMark, pathStyle.Render("~/.claude.json could not be parsed: "+err.Error()))
+		fmt.Fprintf(cliOut, "  %s  %s\n", crossMark, pathStyle.Render("~/.claude.json could not be parsed: "+err.Error()))
 		return
 	}
 
@@ -165,9 +165,9 @@ func checkMCPConfig(checkMark, crossMark string, nameStyle, pathStyle lipgloss.S
 
 	for _, name := range mcpTools {
 		if registered[name] {
-			fmt.Printf("  %s %s  registered\n", nameStyle.Render(name), checkMark)
+			fmt.Fprintf(cliOut, "  %s %s  registered\n", nameStyle.Render(name), checkMark)
 		} else {
-			fmt.Printf("  %s %s  not registered — add: %s\n",
+			fmt.Fprintf(cliOut, "  %s %s  not registered — add: %s\n",
 				nameStyle.Render(name), crossMark,
 				pathStyle.Render(fmt.Sprintf(`claude mcp add %s -- %s mcp`, name, name)))
 		}
@@ -207,18 +207,18 @@ func resolvedToolDBPath(tool string) string {
 var toolDBOrder = []string{"mailctl", "calctl", "taskctl", "notectl", "budgetctl", "habctl", "timectl", "diaryctl"}
 
 func checkDatabases(checkMark, dashMark string, nameStyle, pathStyle lipgloss.Style) {
-	fmt.Println("  Databases:")
-	fmt.Println()
+	fmt.Fprintln(cliOut, "  Databases:")
+	fmt.Fprintln(cliOut)
 
 	for _, name := range toolDBOrder {
 		path := expandHome(resolvedToolDBPath(name))
 		info, err := os.Stat(path)
 		if err != nil {
-			fmt.Printf("  %s %s  not created yet\n", nameStyle.Render(name), dashMark)
+			fmt.Fprintf(cliOut, "  %s %s  not created yet\n", nameStyle.Render(name), dashMark)
 			continue
 		}
 		age := time.Since(info.ModTime())
-		fmt.Printf("  %s %s  last synced %s\n", nameStyle.Render(name), checkMark, pathStyle.Render(formatAge(age)+" ago"))
+		fmt.Fprintf(cliOut, "  %s %s  last synced %s\n", nameStyle.Render(name), checkMark, pathStyle.Render(formatAge(age)+" ago"))
 	}
 }
 
@@ -285,19 +285,19 @@ func parseDaemonStatus(out string) daemonStatus {
 // installed at all, in that case) take manual digging to diagnose instead
 // of showing up here directly.
 func checkDaemons(checkMark, crossMark, dashMark string, nameStyle, pathStyle lipgloss.Style) {
-	fmt.Println("  launchd daemons:")
-	fmt.Println()
+	fmt.Fprintln(cliOut, "  launchd daemons:")
+	fmt.Fprintln(cliOut)
 
 	home, _ := os.UserHomeDir()
 	for _, d := range daemons {
 		plistPath := filepath.Join(home, "Library", "LaunchAgents", d.label+".plist")
 		if _, err := os.Stat(plistPath); err != nil {
-			fmt.Printf("  %s %s  not installed — see `%s daemon --install`\n", nameStyle.Render(d.tool), dashMark, d.tool)
+			fmt.Fprintf(cliOut, "  %s %s  not installed — see `%s daemon --install`\n", nameStyle.Render(d.tool), dashMark, d.tool)
 			continue
 		}
 		out, err := exec.Command("launchctl", "list", d.label).Output()
 		if err != nil {
-			fmt.Printf("  %s %s  plist exists but not loaded — try `launchctl load -w %s`\n",
+			fmt.Fprintf(cliOut, "  %s %s  plist exists but not loaded — try `launchctl load -w %s`\n",
 				nameStyle.Render(d.tool), crossMark, pathStyle.Render(plistPath))
 			continue
 		}
@@ -305,14 +305,14 @@ func checkDaemons(checkMark, crossMark, dashMark string, nameStyle, pathStyle li
 		status := parseDaemonStatus(string(out))
 		switch {
 		case status.lastExitStatus != 0:
-			fmt.Printf("  %s %s  last run failed (exit %d) — check its log\n", nameStyle.Render(d.tool), crossMark, status.lastExitStatus)
+			fmt.Fprintf(cliOut, "  %s %s  last run failed (exit %d) — check its log\n", nameStyle.Render(d.tool), crossMark, status.lastExitStatus)
 		case !status.onDemand && status.pid == "":
-			fmt.Printf("  %s %s  loaded but not running — should be continuous, try `launchctl kickstart -k gui/$(id -u)/%s`\n",
+			fmt.Fprintf(cliOut, "  %s %s  loaded but not running — should be continuous, try `launchctl kickstart -k gui/$(id -u)/%s`\n",
 				nameStyle.Render(d.tool), crossMark, d.label)
 		case status.pid != "":
-			fmt.Printf("  %s %s  running (pid %s)\n", nameStyle.Render(d.tool), checkMark, status.pid)
+			fmt.Fprintf(cliOut, "  %s %s  running (pid %s)\n", nameStyle.Render(d.tool), checkMark, status.pid)
 		default:
-			fmt.Printf("  %s %s  scheduled, last run OK\n", nameStyle.Render(d.tool), checkMark)
+			fmt.Fprintf(cliOut, "  %s %s  scheduled, last run OK\n", nameStyle.Render(d.tool), checkMark)
 		}
 	}
 }

@@ -3,8 +3,8 @@ package cmd
 import (
 	"strings"
 
-	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
+	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 )
 
 // License settings screen — a full-screen mode toggled with "L" from the
@@ -30,7 +30,7 @@ func activateSettingsCmd(key string) tea.Cmd {
 
 // updateSettings handles all key input while the settings screen is open —
 // called instead of the grid's key switch (see dashboardModel.Update).
-func (m dashboardModel) updateSettings(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+func (m dashboardModel) updateSettings(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	switch msg.String() {
 	case "ctrl+c":
 		return m, tea.Quit

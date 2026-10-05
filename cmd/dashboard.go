@@ -2,14 +2,17 @@ package cmd
 
 import (
 	"fmt"
+	"image/color"
+	"os"
 	"os/exec"
 	"strings"
 	"time"
 
+	"charm.land/bubbles/v2/textinput"
+	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 	"github.com/aeon022/missionctl-core/theme"
-	"github.com/charmbracelet/bubbles/textinput"
-	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
+	"github.com/charmbracelet/colorprofile"
 	"github.com/spf13/cobra"
 )
 
@@ -18,7 +21,7 @@ type dashboardCard struct {
 	icon   string
 	label  string
 	tool   string // binary to launch on keypress; "" = no jump target
-	color  lipgloss.Color
+	color  color.Color
 	value  func(now time.Time) cardStatus
 	action func() (string, error) // "x" quick action; nil = none for this card
 }
@@ -191,7 +194,7 @@ func newDashboardModel() dashboardModel {
 	ti := textinput.New()
 	ti.Placeholder = "paste your Bundle key…"
 	ti.CharLimit = 200
-	ti.Width = 50
+	ti.SetWidth(50)
 
 	m := dashboardModel{now: time.Now(), width: 80, settingsInput: ti}
 	m.refresh()
@@ -224,7 +227,7 @@ func (m dashboardModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.width, m.height = msg.Width, msg.Height
 		return m, nil
 
-	case tea.MouseMsg:
+	case tea.MouseMsg: // wheel/click/motion — all swallowed, see below
 		// The card grid always fits on screen — there's nothing to scroll.
 		// Without mouse capture enabled, a trackpad/wheel scroll gets
 		// translated by the terminal into arrow-key escapes instead, which
@@ -240,7 +243,7 @@ func (m dashboardModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, tickEvery(time.Second)
 
-	case tea.KeyMsg:
+	case tea.KeyPressMsg:
 		if m.showSettings {
 			return m.updateSettings(msg)
 		}
@@ -417,16 +420,20 @@ func (m dashboardModel) launch(tool string) tea.Cmd {
 // AdaptiveColor palette, same one the other seven tools in the suite
 // already share, so the dashboard follows the terminal's light/dark mode
 // like everything else does.
+// cliOut is where CLI (non-TUI) commands print: lipgloss v2 styles always emit
+// ANSI, so this strips/downsamples it for pipes and NO_COLOR like v1 did.
+var cliOut = colorprofile.NewWriter(os.Stdout, os.Environ())
+
 var (
-	dashMuted         = theme.Muted
-	dashSubtle        = theme.Subtle
-	dashErrColor      = theme.Red
-	dashWarnColor     = theme.Amber
-	dashCriticalColor = theme.Red
+	dashMuted         = theme.MutedV2
+	dashSubtle        = theme.SubtleV2
+	dashErrColor      = theme.RedV2
+	dashWarnColor     = theme.AmberV2
+	dashCriticalColor = theme.RedV2
 
 	dashTitleStyle = lipgloss.NewStyle().
 			Bold(true).
-			Foreground(theme.OnAccent).
+			Foreground(theme.OnAccentV2).
 			Background(lipgloss.Color("57")).
 			Padding(0, 2)
 
@@ -434,9 +441,9 @@ var (
 	dashRuleStyle    = lipgloss.NewStyle().Foreground(dashSubtle)
 	dashClockStyle   = lipgloss.NewStyle().Foreground(dashMuted)
 	dashFootStyle    = lipgloss.NewStyle().Foreground(dashSubtle)
-	dashKeyStyle     = lipgloss.NewStyle().Foreground(theme.Amber).Bold(true)
+	dashKeyStyle     = lipgloss.NewStyle().Foreground(theme.AmberV2).Bold(true)
 	dashErrStyle     = lipgloss.NewStyle().Foreground(dashErrColor).Bold(true)
-	dashOKStyle      = lipgloss.NewStyle().Foreground(theme.Green).Bold(true)
+	dashOKStyle      = lipgloss.NewStyle().Foreground(theme.GreenV2).Bold(true)
 	dashMutedStyle   = lipgloss.NewStyle().Foreground(dashMuted)
 
 	// checkMark/crossMark/dashMark/nameStyle: the ✓/✗/– status marks and
@@ -472,7 +479,7 @@ func (m dashboardModel) renderCard(i int) string {
 	w := m.cardWidth()
 	selected := i == m.cursor
 
-	var cardColor lipgloss.TerminalColor = c.color
+	var cardColor color.Color = c.color
 	switch m.values[i].urgency {
 	case urgencyCritical:
 		cardColor = dashCriticalColor
@@ -619,7 +626,15 @@ func (m dashboardModel) renderAgenda() string {
 	return b.String()
 }
 
-func (m dashboardModel) View() string {
+func (m dashboardModel) View() tea.View {
+	v := tea.NewView(m.viewContent())
+	// v1's WithAltScreen/WithMouseCellMotion Program options are per-View fields in v2.
+	v.AltScreen = true
+	v.MouseMode = tea.MouseModeCellMotion
+	return v
+}
+
+func (m dashboardModel) viewContent() string {
 	if m.showSettings {
 		return m.renderSettings()
 	}
@@ -718,7 +733,7 @@ func (m dashboardModel) View() string {
 }
 
 func runDashboard(_ *cobra.Command, _ []string) error {
-	p := tea.NewProgram(newDashboardModel(), tea.WithAltScreen(), tea.WithMouseCellMotion())
+	p := tea.NewProgram(newDashboardModel())
 	_, err := p.Run()
 	return err
 }
