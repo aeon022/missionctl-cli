@@ -47,6 +47,7 @@ missionctl notify --dry-run
 | `missionctl`         | Dashboard TUI — same briefing as `status`, press 1-9/enter to jump into a tool, `/` to search |
 | `missionctl doctor`  | Installed tools, env vars, MCP registration, DB freshness, daemons  |
 | `missionctl status`  | Daily briefing: tasks, calendar, timer, diary, budget, habits, notes, mail |
+| `missionctl log`     | Activity log: what you did across the suite (`--since`, `--tool`, `--json`) |
 | `missionctl search`  | Search all tools at once (`--per-tool N`, `--json`)                 |
 | `missionctl plan`    | AI day plan from calendar, open tasks, habits (`--lang`, `--show-prompt`) |
 | `missionctl review`  | AI weekly review across time, tasks, habits, budget, diary          |
@@ -203,6 +204,33 @@ missionctl notify --uninstall    # unloads and removes it again
 
 `--install` only writes the file and prints the `launchctl load` line; it does
 not start anything. Output goes to `~/Library/Logs/missionctl/notify.log`.
+
+### `missionctl log [--since WINDOW] [--tool TOOL] [--json]`
+
+The suite's **activity log**: every tool writes one line when you add, complete,
+delete, check, start, stop, write, send or publish something — `missionctl log`
+shows it, grouped by day (newest day first).
+
+```sh
+missionctl log                        # today
+missionctl log --since yesterday
+missionctl log --since 7d --tool taskctl
+missionctl log --since 2026-10-01 --json
+```
+
+`--since` takes `today`, `yesterday`, `Nd`, `Nw` or `YYYY-MM-DD`. The log lives in
+`~/.local/share/missionctl/activity.jsonl` (override with `MISSIONCTL_DATA_DIR`).
+**Only titles are logged** — never note bodies, mail text, recipients or amounts
+(budgetctl logs just "a transaction" / "N transactions").
+
+Settings (`~/.config/missionctl/activity.yaml`):
+
+| Command | Effect |
+|---|---|
+| `missionctl log --disable` / `--enable` | Stop / resume logging for every tool (`MISSIONCTL_ACTIVITY=off` disables it too) |
+| `missionctl log --diary ask` | diaryctl offers to add the day's activity to your diary after 18:00 (default) |
+| `missionctl log --diary auto` | diaryctl adds it automatically when the day-end entry is generated |
+| `missionctl log --diary off` | never |
 
 ### `missionctl init`
 
