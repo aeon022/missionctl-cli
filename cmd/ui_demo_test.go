@@ -29,7 +29,7 @@ func TestRenderUIDemoShowsEveryBlockWithinWidth(t *testing.T) {
 }
 
 func TestDemoPresetsExistInCore(t *testing.T) {
-	if len(demoPresets) != 8 {
-		t.Errorf("expected the 8 shipped presets, got %v", demoPresets)
+	if len(demoPresets) != 9 {
+		t.Errorf("expected the 9 shipped presets, got %v", demoPresets)
 	}
 }

@@ -14,7 +14,7 @@ import (
 )
 
 // demoPresets are the theme presets shipped in missionctl-core/theme.
-var demoPresets = []string{"catppuccin", "dracula", "gruvbox", "nord", "one-dark", "solarized", "tokyo-night", "terminal"}
+var demoPresets = []string{"catppuccin", "dracula", "gruvbox", "nord", "one-dark", "solarized", "tokyo-night", "terminal", "classic"}
 
 const demoWidth = 72
 

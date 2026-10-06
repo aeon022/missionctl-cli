@@ -238,7 +238,7 @@ Draws the suite's shared UI building blocks once — pills, key caps, budget/pro
 (1/8-cell resolution), sparkline, heatmap cells, toasts, header, divider, a list with a
 selected row, relative dates, mid-ellipsis and colored money — so you can judge colors and
 shapes in *your* terminal and theme. `--all` renders every theme preset in turn
-(`catppuccin`, `dracula`, `gruvbox`, `nord`, `one-dark`, `solarized`, `tokyo-night`, `terminal` = your terminal's own ANSI palette).
+(`terminal` = your terminal's own ANSI palette, the default; `classic`, `catppuccin`, `dracula`, `gruvbox`, `nord`, `one-dark`, `solarized`, `tokyo-night`).
 Set `MISSIONCTL_ICONS=nerd` (or `icons: nerd` in `~/.config/missionctl/ui.yaml`) to use Nerd
 Font glyphs; the default is plain Unicode that needs no special font.
 
