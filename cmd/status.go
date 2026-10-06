@@ -92,7 +92,7 @@ func syncAge(tool string) string {
 	if err != nil {
 		return "not synced yet"
 	}
-	return formatAge(time.Since(info.ModTime())) + " ago"
+	return ago(time.Since(info.ModTime()))
 }
 
 func runStatus(_ *cobra.Command, _ []string) error {

@@ -223,7 +223,7 @@ func checkDatabases(checkMark, dashMark string, nameStyle, pathStyle lipgloss.St
 			continue
 		}
 		age := time.Since(info.ModTime())
-		line := fmt.Sprintf("  %s %s  last synced %s", nameStyle.Render(name), checkMark, pathStyle.Render(formatAge(age)+" ago"))
+		line := fmt.Sprintf("  %s %s  last synced %s", nameStyle.Render(name), checkMark, pathStyle.Render(ago(age)))
 		if res := sqliteQuickCheck(path); res != "ok" {
 			line = fmt.Sprintf("  %s %s  %s", nameStyle.Render(name), crossMark, "integrity check: "+res)
 		}
@@ -301,6 +301,15 @@ func checkToolSelfTests(checkMark, crossMark, dashMark string, nameStyle, pathSt
 			fmt.Fprintf(cliOut, "  %s %s  %s\n", nameStyle.Render(name), crossMark, pathStyle.Render(reason))
 		}
 	}
+}
+
+// ago renders how long ago something happened: "just now" (never "just now
+// ago"), "5m ago", "2h ago", "3d ago".
+func ago(d time.Duration) string {
+	if d < time.Minute {
+		return "just now"
+	}
+	return formatAge(d) + " ago"
 }
 
 func formatAge(d time.Duration) string {

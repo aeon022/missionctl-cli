@@ -307,3 +307,14 @@ func TestCalAndTimerStatus(t *testing.T) {
 		t.Errorf("idle timer = %q", got)
 	}
 }
+
+func TestAgoNeverSaysJustNowAgo(t *testing.T) {
+	for d, want := range map[time.Duration]string{
+		0: "just now", 30 * time.Second: "just now", time.Minute: "1m ago",
+		5 * time.Minute: "5m ago", 3 * time.Hour: "3h ago", 49 * time.Hour: "2d ago",
+	} {
+		if got := ago(d); got != want {
+			t.Errorf("ago(%v) = %q, want %q", d, got, want)
+		}
+	}
+}
