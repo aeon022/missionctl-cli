@@ -232,6 +232,16 @@ Settings (`~/.config/missionctl/activity.yaml`):
 | `missionctl log --diary auto` | diaryctl adds it automatically when the day-end entry is generated |
 | `missionctl log --diary off` | never |
 
+### `missionctl ui-demo [--all]`
+
+Draws the suite's shared UI building blocks once — pills, key caps, budget/progress bars
+(1/8-cell resolution), sparkline, heatmap cells, toasts, header, divider, a list with a
+selected row, relative dates, mid-ellipsis and colored money — so you can judge colors and
+shapes in *your* terminal and theme. `--all` renders every theme preset in turn
+(`catppuccin`, `dracula`, `gruvbox`, `nord`, `one-dark`, `solarized`, `tokyo-night`).
+Set `MISSIONCTL_ICONS=nerd` (or `icons: nerd` in `~/.config/missionctl/ui.yaml`) to use Nerd
+Font glyphs; the default is plain Unicode that needs no special font.
+
 ### `missionctl init`
 
 Interactive wizard for a fresh machine: prompts for `ANTHROPIC_API_KEY` and
