@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"fmt"
 	"os"
 	"strings"
 	"testing"
@@ -8,6 +9,7 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
+	"github.com/aeon022/missionctl-core/activity"
 	"github.com/charmbracelet/x/ansi"
 )
 
@@ -35,13 +37,13 @@ func TestDashboardViewRenders(t *testing.T) {
 }
 
 func TestDashboardCursorMovement(t *testing.T) {
-	// Cards form a 2-column grid, so j/down must move a full row (+cardCols)
+	// Cards form a 2-column grid, so j/down must move a full row (+m.cols())
 	// and l/right must move one column (+1) — not the other way around.
 	m := newDashboardModel()
 	mi, _ := m.Update(tea.KeyPressMsg{Text: "j", Code: []rune("j")[0]})
 	m = mi.(dashboardModel)
-	if m.cursor != cardCols {
-		t.Errorf("expected cursor %d after j (down one row), got %d", cardCols, m.cursor)
+	if m.cursor != m.cols() {
+		t.Errorf("expected cursor %d after j (down one row), got %d", m.cols(), m.cursor)
 	}
 	mi, _ = m.Update(tea.KeyPressMsg{Text: "k", Code: []rune("k")[0]})
 	m = mi.(dashboardModel)
@@ -167,7 +169,7 @@ func TestDashboardClickSelectsAndDoubleClickLaunches(t *testing.T) {
 	m.width, m.height = 100, 40
 	w := m.cardWidth()
 	// second column, first row: inside the card at index 1
-	x, y := len(rowIndent)+w+len(cardGap)+2, 5
+	x, y := m.gridLeft()+w+len(cardGap)+2, 5
 	if got := m.cardAt(x, y); got != 1 {
 		t.Fatalf("cardAt(%d,%d) = %d, want 1", x, y, got)
 	}
@@ -188,7 +190,7 @@ func TestDashboardClickSelectsAndDoubleClickLaunches(t *testing.T) {
 func TestDashboardHoverTracksMouse(t *testing.T) {
 	m := newDashboardModel()
 	m.width = 100
-	x, y := len(rowIndent)+2, 5
+	x, y := m.gridLeft()+2, 5
 	mi, _ := m.Update(tea.MouseMotionMsg{X: x, Y: y})
 	if got := mi.(dashboardModel).hover; got != 0 {
 		t.Errorf("hover = %d, want 0", got)
@@ -458,5 +460,158 @@ func TestLoadCardIDsFromSuiteConfigDir(t *testing.T) {
 	}
 	if want := dir + "/notified.json"; notifyStatePath() != want {
 		t.Errorf("notify state lives next to theme.yaml: %s, want %s", notifyStatePath(), want)
+	}
+}
+
+func TestColsAndCardWidthByTerminalWidth(t *testing.T) {
+	for w, want := range map[int]int{20: 1, 69: 1, 70: 2, 100: 2, 149: 2, 150: 3, 220: 3} {
+		if got := colsFor(w); got != want {
+			t.Errorf("colsFor(%d) = %d, want %d", w, got, want)
+		}
+	}
+	for _, c := range []struct{ width, cols, want int }{
+		{100, 2, 47}, {60, 1, 58}, {170, 3, 54}, {240, 3, 60}, {20, 1, 24}, {30, 1, 28}, // cap and floor
+	} {
+		if got := cardWidthFor(c.width, c.cols); got != c.want {
+			t.Errorf("cardWidthFor(%d,%d) = %d, want %d", c.width, c.cols, got, c.want)
+		}
+	}
+	// a capped grid is centered, an uncapped one sits at the indent
+	if got := gridLeftFor(240, 3, 60); got != (240-(3*60+6))/2 {
+		t.Errorf("capped grid not centered: %d", got)
+	}
+	if got := gridLeftFor(100, 2, 47); got != len(rowIndent) {
+		t.Errorf("uncapped grid left = %d, want the indent", got)
+	}
+}
+
+func dashAt(width, height int) dashboardModel {
+	m := newDashboardModel()
+	m.width, m.height = width, height
+	mi, _ := m.Update(cardsLoadedMsg{values: make([]cardStatus, len(dashboardCards)), at: time.Now()})
+	return mi.(dashboardModel)
+}
+
+func TestThreeColumnsCursorAndHitTest(t *testing.T) {
+	m := dashAt(170, 40)
+	if m.cols() != 3 {
+		t.Fatalf("cols = %d at width 170", m.cols())
+	}
+	w, left := m.cardWidth(), m.gridLeft()
+	if got := m.cardAt(left+2*(w+len(cardGap))+2, 5); got != 2 {
+		t.Errorf("click in the third column = card %d, want 2", got)
+	}
+	mi, _ := m.Update(tea.KeyPressMsg{Text: "j", Code: 'j'})
+	if got := mi.(dashboardModel).cursor; got != 3 {
+		t.Errorf("j moves one row = 3 cards at 3 columns, got %d", got)
+	}
+	m.cursor = 2
+	mi, _ = m.Update(tea.KeyPressMsg{Text: "l", Code: 'l'})
+	if got := mi.(dashboardModel).cursor; got != 2 {
+		t.Errorf("l at the right edge must not wrap, got %d", got)
+	}
+	m.cursor = 6 // last row has only two cards: 6,7
+	mi, _ = m.Update(tea.KeyPressMsg{Text: "l", Code: 'l'})
+	mi, _ = mi.Update(tea.KeyPressMsg{Text: "l", Code: 'l'})
+	if got := mi.(dashboardModel).cursor; got != 7 {
+		t.Errorf("l stops at the last card, got %d", got)
+	}
+}
+
+func TestSingleColumnOnNarrowTerminal(t *testing.T) {
+	m := dashAt(60, 50)
+	if m.cols() != 1 {
+		t.Fatalf("cols = %d", m.cols())
+	}
+	mi, _ := m.Update(tea.KeyPressMsg{Text: "j", Code: 'j'})
+	if got := mi.(dashboardModel).cursor; got != 1 {
+		t.Errorf("single column: j moves one card, got %d", got)
+	}
+	if todayPanelHeight(50, 40, 1) != 0 || strings.Contains(ansi.Strip(m.viewContent()), "Recent activity") {
+		t.Error("no Today panel on a single-column terminal")
+	}
+}
+
+func TestCardBorderColorMeansAttention(t *testing.T) {
+	if cardBorderColor(urgencyNormal, false) != dashSubtle {
+		t.Error("calm cards have a neutral border")
+	}
+	if cardBorderColor(urgencyWarn, false) != dashWarnColor || cardBorderColor(urgencyCritical, false) != dashCriticalColor {
+		t.Error("urgency colors the border")
+	}
+	if cardBorderColor(urgencyNormal, true) == dashSubtle {
+		t.Error("the selected card gets the accent")
+	}
+	if cardBorderColor(urgencyCritical, true) != dashCriticalColor {
+		t.Error("urgency wins over the selection accent: red must always mean attention")
+	}
+	for _, c := range allDashboardCards {
+		if c.label == "Habits" && fmt.Sprint(c.color) == fmt.Sprint(lipgloss.Color("203")) {
+			t.Error("Habits must not use the urgency red")
+		}
+	}
+}
+
+func TestActivityLinesNewestFirstAndLimited(t *testing.T) {
+	ts := func(h int) time.Time { return time.Date(2026, 10, 6, h, 0, 0, 0, time.Local) }
+	evs := []activity.Event{
+		{Time: ts(9), Tool: "taskctl", Action: "completed", Title: "A"},
+		{Time: ts(10), Tool: "habctl", Action: "checked", Title: "B"},
+		{Time: ts(11), Tool: "timectl", Action: "started", Title: "C"},
+	}
+	got := activityLines(evs, 2)
+	if len(got) != 2 || !strings.Contains(ansi.Strip(got[0]), "11:00  timectl   started    C") || !strings.Contains(ansi.Strip(got[1]), "habctl") {
+		t.Errorf("newest first, limited to 2: %q", got)
+	}
+	if len(activityLines(nil, 8)) != 0 {
+		t.Error("no events = no lines")
+	}
+}
+
+func TestTodayPanelHeightRules(t *testing.T) {
+	for _, c := range []struct{ height, cardsH, cols, want int }{
+		{40, 18, 3, 13}, {40, 22, 3, 9}, {40, 23, 3, 0}, {100, 18, 3, 14}, {40, 18, 1, 0}, {0, 18, 3, 0}, {30, 24, 2, 0},
+	} {
+		if got := todayPanelHeight(c.height, c.cardsH, c.cols); got != c.want {
+			t.Errorf("todayPanelHeight(%d,%d,%d) = %d, want %d", c.height, c.cardsH, c.cols, got, c.want)
+		}
+	}
+}
+
+func TestTodayPanelShowsAgendaAndActivityWhenThereIsRoom(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	m := dashAt(170, 40)
+	out := ansi.Strip(m.viewContent())
+	if !strings.Contains(out, "Today") || !strings.Contains(out, "Recent activity") || !strings.Contains(out, "Nothing logged yet") {
+		t.Fatalf("Today panel missing at 170x40:\n%s", out)
+	}
+	if !strings.Contains(out, "loading…") && !strings.Contains(out, "Nothing scheduled") {
+		t.Errorf("agenda side must say loading or nothing scheduled:\n%s", out)
+	}
+	m.activity = []activity.Event{{Time: time.Now(), Tool: "taskctl", Action: "completed", Title: "Steuer"}}
+	mi, _ := m.Update(agendaLoadedMsg{timed: []agendaItem{{when: time.Date(2026, 10, 6, 14, 0, 0, 0, time.Local), hasTime: true, icon: "📅", text: "Review"}}})
+	m = mi.(dashboardModel)
+	out = ansi.Strip(m.viewContent())
+	if !strings.Contains(out, "completed") || !strings.Contains(out, "Steuer") || !strings.Contains(out, "14:00") || !strings.Contains(out, "Review") {
+		t.Errorf("agenda and activity content missing:\n%s", out)
+	}
+	for i, l := range strings.Split(m.viewContent(), "\n") {
+		if w := lipgloss.Width(l); w > 170 {
+			t.Errorf("line %d is %d cells wide (> 170)", i, w)
+		}
+	}
+	if n := strings.Count(m.viewContent(), "\n"); n != 40 {
+		t.Errorf("the view must fill exactly the terminal height, got %d lines", n)
+	}
+	if small := dashAt(100, 30); strings.Contains(ansi.Strip(small.viewContent()), "Recent activity") {
+		t.Error("no room at 100x30: the Today panel stays hidden")
+	}
+}
+
+func TestHeaderClockUsesDayMonthFormat(t *testing.T) {
+	m := dashAt(100, 30)
+	m.now = time.Date(2026, 10, 6, 14, 4, 22, 0, time.Local)
+	if out := ansi.Strip(m.renderHeader()); !strings.Contains(out, "Tue 06 Oct · 14:04:22") {
+		t.Errorf("header clock: %q", out)
 	}
 }

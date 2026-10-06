@@ -13,9 +13,11 @@ import (
 	"charm.land/bubbles/v2/textinput"
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
+	"github.com/aeon022/missionctl-core/activity"
 	"github.com/aeon022/missionctl-core/keymap"
 	"github.com/aeon022/missionctl-core/overlay"
 	"github.com/aeon022/missionctl-core/theme"
+	"github.com/aeon022/missionctl-core/ui"
 	"github.com/charmbracelet/colorprofile"
 	"github.com/spf13/cobra"
 )
@@ -38,7 +40,7 @@ var allDashboardCards = []dashboardCard{
 	{"3", "⏱", "Timer", "timectl", lipgloss.Color("221"), timerStatus, quickStopTimer},
 	{"4", "📔", "Diary", "diaryctl", lipgloss.Color("212"), func(_ time.Time) cardStatus { return diaryStatus() }, nil},
 	{"5", "💰", "Budget", "budgetctl", lipgloss.Color("208"), budgetStatus, nil},
-	{"6", "🔥", "Habits", "habctl", lipgloss.Color("203"), habitStatus, quickCheckHabit},
+	{"6", "🔥", "Habits", "habctl", lipgloss.Color("79"), habitStatus, quickCheckHabit},
 	{"7", "📝", "Notes", "notectl", lipgloss.Color("135"), noteStatus, nil},
 	{"8", "✉", "Mail", "mailctl", lipgloss.Color("33"), func(_ time.Time) cardStatus { return mailStatus() }, nil},
 }
@@ -205,6 +207,8 @@ type dashboardModel struct {
 
 	showAgenda   bool // "a" toggles between the card grid and the agenda view
 	agendaLoad   bool
+	agendaReady  bool             // the Today panel has agenda data (loaded with the cards)
+	activity     []activity.Event // today's activity log, loaded with the cards
 	agendaAllDay []agendaItem
 	agendaTimed  []agendaItem
 
@@ -234,8 +238,9 @@ func newDashboardModel() dashboardModel {
 // those one after another inside Update froze the dashboard at startup and
 // every 30 seconds.
 type cardsLoadedMsg struct {
-	values []cardStatus
-	at     time.Time
+	values   []cardStatus
+	at       time.Time
+	activity []activity.Event
 }
 
 func refreshCmd() tea.Cmd {
@@ -251,7 +256,9 @@ func refreshCmd() tea.Cmd {
 			}()
 		}
 		wg.Wait()
-		return cardsLoadedMsg{values: vals, at: now}
+		from, to := activity.Day(now)
+		evs, _ := activity.Read(from, to)
+		return cardsLoadedMsg{values: vals, at: now, activity: evs}
 	}
 }
 
@@ -261,7 +268,7 @@ func (m *dashboardModel) startRefresh() tea.Cmd {
 		return nil
 	}
 	m.loading = true
-	return refreshCmd()
+	return tea.Batch(refreshCmd(), loadAgendaCmd())
 }
 
 func tickEvery(d time.Duration) tea.Cmd {
@@ -269,7 +276,7 @@ func tickEvery(d time.Duration) tea.Cmd {
 }
 
 func (m dashboardModel) Init() tea.Cmd {
-	return tea.Batch(tickEvery(time.Second), refreshCmd())
+	return tea.Batch(tickEvery(time.Second), refreshCmd(), loadAgendaCmd())
 }
 
 func (m dashboardModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
@@ -330,6 +337,7 @@ func (m dashboardModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case cardsLoadedMsg:
+		m.activity = msg.activity
 		m.values = msg.values
 		for i := range m.loaded {
 			m.loaded[i] = true
@@ -392,22 +400,22 @@ func (m dashboardModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case "ctrl+c", "q", "esc":
 			return m, tea.Quit
 		case "j", "down":
-			if !m.showAgenda && m.cursor+cardCols < len(dashboardCards) {
-				m.cursor += cardCols
+			if !m.showAgenda && m.cursor+m.cols() < len(dashboardCards) {
+				m.cursor += m.cols()
 			}
 			return m, nil
 		case "k", "up":
-			if !m.showAgenda && m.cursor-cardCols >= 0 {
-				m.cursor -= cardCols
+			if !m.showAgenda && m.cursor-m.cols() >= 0 {
+				m.cursor -= m.cols()
 			}
 			return m, nil
 		case "h", "left":
-			if !m.showAgenda && m.cursor%cardCols != 0 {
+			if !m.showAgenda && m.cursor%m.cols() != 0 {
 				m.cursor--
 			}
 			return m, nil
 		case "l", "right":
-			if !m.showAgenda && m.cursor%cardCols != cardCols-1 && m.cursor < len(dashboardCards)-1 {
+			if !m.showAgenda && m.cursor%m.cols() != m.cols()-1 && m.cursor < len(dashboardCards)-1 {
 				m.cursor++
 			}
 			return m, nil
@@ -500,7 +508,7 @@ func (m dashboardModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, m.startRefresh()
 
 	case agendaLoadedMsg:
-		m.agendaLoad = false
+		m.agendaLoad, m.agendaReady = false, true
 		m.agendaAllDay = msg.allDay
 		m.agendaTimed = msg.timed
 		return m, nil
@@ -595,38 +603,70 @@ var (
 )
 
 const (
-	cardCols  = 2
 	rowIndent = "  "
 	cardGap   = "   "
+	minCardW  = 24
+	maxCardW  = 60
 )
 
-func (m dashboardModel) cardWidth() int {
-	// two columns with a visible gap between them, plus the row indent
-	w := (m.width - len(rowIndent) - len(cardGap)) / cardCols
-	if w < 24 {
-		w = 24
+// colsFor is how many card columns fit: 1 below 70 cells, 2 up to 149, 3 from 150.
+func colsFor(width int) int {
+	switch {
+	case width < 70:
+		return 1
+	case width < 150:
+		return 2
 	}
-	if w > 44 {
-		w = 44
+	return 3
+}
+
+// cardWidthFor splits the width into cols cards (with gaps and the row indent),
+// clamped to [minCardW, maxCardW] — beyond the cap the grid is centered instead
+// of stretched.
+func cardWidthFor(width, cols int) int {
+	w := (width - len(rowIndent) - len(cardGap)*(cols-1)) / cols
+	return min(max(w, minCardW), maxCardW)
+}
+
+// gridLeftFor is the left margin: centers a capped grid, never less than the indent.
+func gridLeftFor(width, cols, w int) int {
+	return max((width-(cols*w+len(cardGap)*(cols-1)))/2, len(rowIndent))
+}
+
+func (m dashboardModel) cols() int      { return colsFor(m.width) }
+func (m dashboardModel) cardWidth() int { return cardWidthFor(m.width, m.cols()) }
+func (m dashboardModel) gridLeft() int  { return gridLeftFor(m.width, m.cols(), m.cardWidth()) }
+
+// cardBorderColor: borders are neutral so that colour means something — amber
+// or red only when a card needs attention (urgency wins over everything else),
+// the accent for the selected card, otherwise a quiet gray.
+func cardBorderColor(u urgencyLevel, selected bool) color.Color {
+	switch {
+	case u == urgencyCritical:
+		return dashCriticalColor
+	case u == urgencyWarn:
+		return dashWarnColor
+	case selected:
+		return theme.BlueV2
 	}
-	return w
+	return dashSubtle
 }
 
 // cardAt maps a terminal cell to the card drawn there (-1 for none), using the
-// same layout viewContent produces: a 4-line header block, then rows of
-// cardCols cards whose height is that of the tallest card in the row.
+// same layout gridContent produces: a 4-line header block, then rows of
+// cols() cards, centered at gridLeft(), each row as tall as its tallest card.
 func (m dashboardModel) cardAt(x, y int) int {
 	const gridTop = 4 // blank, banner, rule, blank
-	w := m.cardWidth()
+	w, cols, left := m.cardWidth(), m.cols(), m.gridLeft()
 	top := gridTop
-	for row := 0; row < len(dashboardCards); row += cardCols {
+	for row := 0; row < len(dashboardCards); row += cols {
 		h := 0
-		for col := 0; col < cardCols && row+col < len(dashboardCards); col++ {
+		for col := 0; col < cols && row+col < len(dashboardCards); col++ {
 			h = max(h, lipgloss.Height(m.renderCard(row+col)))
 		}
 		if y >= top && y < top+h {
-			for col := 0; col < cardCols && row+col < len(dashboardCards); col++ {
-				x0 := len(rowIndent) + col*(w+len(cardGap))
+			for col := 0; col < cols && row+col < len(dashboardCards); col++ {
+				x0 := left + col*(w+len(cardGap))
 				if x >= x0 && x < x0+w {
 					return row + col
 				}
@@ -647,17 +687,9 @@ func (m dashboardModel) renderCard(i int) string {
 	inner := w - 4
 	selected := i == m.cursor
 
-	var cardColor color.Color = c.color
-	switch m.values[i].urgency {
-	case urgencyCritical:
-		cardColor = dashCriticalColor
-	case urgencyWarn:
-		cardColor = dashWarnColor
-	}
-
 	border := lipgloss.RoundedBorder()
-	borderColor := cardColor
-	titleStyle := lipgloss.NewStyle().Bold(true).Foreground(cardColor)
+	borderColor := cardBorderColor(m.values[i].urgency, selected)
+	titleStyle := lipgloss.NewStyle().Bold(true).Foreground(c.color) // the card's own colour lives on the title only
 	if selected {
 		border = lipgloss.ThickBorder()
 		titleStyle = titleStyle.Underline(true)
@@ -753,7 +785,7 @@ func (m dashboardModel) renderHeader() string {
 
 	badge := dashTitleStyle.Render("🛰  MISSIONCTL")
 	tagline := dashTaglineStyle.Render("mission control for your terminal")
-	clock := dashClockStyle.Render(m.now.Format("Mon Jan 02 · 15:04:05"))
+	clock := dashClockStyle.Render(m.now.Format("Mon 02 Jan · 15:04:05"))
 
 	left := badge + "  " + tagline
 	gap := contentW - lipgloss.Width(left) - lipgloss.Width(clock)
@@ -889,10 +921,12 @@ func (m dashboardModel) gridContent() string {
 	if m.showAgenda {
 		b.WriteString(m.renderAgenda())
 	} else {
-		// grid: 2 cards per row, with a visible gap between columns
-		for row := 0; row < len(dashboardCards); row += cardCols {
+		// grid: m.cols() cards per row (1/2/3 by width), centered at gridLeft()
+		cols, left := m.cols(), strings.Repeat(" ", m.gridLeft())
+		cardsH := 0
+		for row := 0; row < len(dashboardCards); row += cols {
 			var cells []string
-			for col := 0; col < cardCols && row+col < len(dashboardCards); col++ {
+			for col := 0; col < cols && row+col < len(dashboardCards); col++ {
 				if col > 0 {
 					cells = append(cells, cardGap)
 				}
@@ -900,8 +934,12 @@ func (m dashboardModel) gridContent() string {
 			}
 			rowBlock := lipgloss.JoinHorizontal(lipgloss.Top, cells...)
 			for _, l := range strings.Split(rowBlock, "\n") {
-				b.WriteString(rowIndent + l + "\n")
+				b.WriteString(left + l + "\n")
+				cardsH++
 			}
+		}
+		if h := todayPanelHeight(m.height, cardsH, cols); h > 0 {
+			b.WriteString("\n" + m.renderTodayPanels(h, left) + "\n")
 		}
 	}
 
@@ -1085,4 +1123,70 @@ func (m dashboardModel) renderSearch() string {
 		dashKeyStyle.Render("enter"), dashKeyStyle.Render("↑↓"), dashKeyStyle.Render("enter"), dashKeyStyle.Render("esc"))
 	b.WriteString(rowIndent + dashFootStyle.Render(foot) + "\n")
 	return b.String()
+}
+
+// ── Today panel: agenda + recent activity under the cards ────────────────────
+
+// todayPanelHeight is the height of the Today panels, 0 when they don't fit.
+// Fixed rows around the card block: 4 header lines, 1 blank above the panels,
+// 3 below (blank, error, status) and the footer — i.e. 8 + cards + panels.
+// Hidden on single-column (narrow) terminals and when fewer than 10 rows are free.
+func todayPanelHeight(height, cardsH, cols int) int {
+	if cols < 2 || height <= 0 {
+		return 0
+	}
+	room := height - 8 - cardsH
+	if room < 10 {
+		return 0
+	}
+	return min(room-1, 14)
+}
+
+// activityLines formats the n most recent events, newest first.
+func activityLines(evs []activity.Event, n int) []string {
+	var out []string
+	for i := len(evs) - 1; i >= 0 && len(out) < n; i-- {
+		e := evs[i]
+		out = append(out, fmt.Sprintf("%s  %-9s %-10s %s", dashMutedStyle.Render(e.Time.Format("15:04")), e.Tool, e.Action, e.Title))
+	}
+	return out
+}
+
+// agendaLines is the Today panel's left side: all-day items, then timed ones.
+func agendaLines(allDay, timed []agendaItem, ready bool) []string {
+	if !ready {
+		return []string{dashMutedStyle.Render("loading…")}
+	}
+	if len(allDay)+len(timed) == 0 {
+		return []string{dashMutedStyle.Render("Nothing scheduled today.")}
+	}
+	var out []string
+	for _, it := range allDay {
+		out = append(out, "       "+lipgloss.NewStyle().Foreground(it.color).Render(it.icon)+" "+it.text)
+	}
+	for _, it := range timed {
+		out = append(out, dashMutedStyle.Render(it.when.Format("15:04"))+"  "+lipgloss.NewStyle().Foreground(it.color).Render(it.icon)+" "+it.text)
+	}
+	return out
+}
+
+// renderTodayPanels draws "Today" (agenda) beside "Recent activity", together as
+// wide as the card grid, h rows tall.
+func (m dashboardModel) renderTodayPanels(h int, left string) string {
+	total := m.cols()*m.cardWidth() + len(cardGap)*(m.cols()-1)
+	lw := (total - 1) / 2
+	rw := total - 1 - lw
+	agenda := strings.Join(agendaLines(m.agendaAllDay, m.agendaTimed, m.agendaReady), "\n")
+	act := activityLines(m.activity, h-2)
+	if len(act) == 0 {
+		act = []string{dashMutedStyle.Render("Nothing logged yet — see `missionctl log`")}
+	}
+	row := lipgloss.JoinHorizontal(lipgloss.Top,
+		ui.Panel(lw, h, "Today", agenda, false), " ",
+		ui.Panel(rw, h, "Recent activity", strings.Join(act, "\n"), false))
+	lines := strings.Split(row, "\n")
+	for i := range lines {
+		lines[i] = left + lines[i]
+	}
+	return strings.Join(lines, "\n")
 }
