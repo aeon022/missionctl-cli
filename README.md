@@ -77,6 +77,7 @@ while a tool runs and refreshes when it exits.
 | `s` | Sync all tools one after another |
 | `r` | Reload now |
 | `a` | Today's agenda (calendar + due tasks + timer sessions in one timeline); `a` again goes back |
+| `d` / `space` | Peek: read-only list of the selected card's items (open tasks, today's events, timer sessions, habits, recent notes) without leaving the dashboard — `enter` opens the tool, `esc` closes |
 | `/` | Search across all tools (see below) |
 | `?` | Key reference popup (any key closes it) |
 | `L` | License settings (activate a Bundle key for every tool at once) |
@@ -91,6 +92,11 @@ never freezes — a card without data yet says `loading…`, and the footer show
 launched tool exits, after a quick action or sync, and when the terminal window
 regains focus (at most every 5 seconds). A card turns amber/red when something
 needs attention (overdue tasks, a blown budget goal).
+
+**Sparklines**: the Tasks card shows a 7-bar sparkline of tasks completed per day
+and the Timer card the minutes tracked per day over the last 7 days (`▁▂▃▄▅▆▇█`,
+right-aligned on the detail line). The Habits card has none: `habctl` only
+reports today's status, not a per-day history.
 
 **Choosing cards**: create `dashboard.yaml` in missionctl's config directory
 (`~/.config/missionctl/`) to show only some cards,
@@ -111,7 +117,8 @@ Reports, for every tool in the suite:
 - Whether the binary is on `PATH`, and the install command if not
 - Required/optional environment variables (`ANTHROPIC_API_KEY`, `TIMECTL_GOAL_HOURS`, `TIMECTL_HOURLY_RATE`)
 - Whether it's registered as an MCP server in `~/.claude.json`
-- Its SQLite database's last-modified time (i.e. last sync)
+- Its SQLite database's last-modified time (i.e. last sync), plus a `PRAGMA quick_check` integrity result (database opened read-only)
+- The tool's own `<tool> doctor` self-check (5 s timeout): ✓/✗ with the first failing line; a ✗ line counts as failed even when the exit code is 0
 - Whether its launchd daemon (diaryctl, taskctl) is installed and loaded
 
 Exits non-zero if any tool is missing, so it can be used in scripts.
