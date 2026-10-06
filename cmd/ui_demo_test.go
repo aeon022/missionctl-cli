@@ -16,7 +16,7 @@ func TestRenderUIDemoShowsEveryBlockWithinWidth(t *testing.T) {
 	out := renderUIDemo("current theme", now)
 	text := ansi.Strip(out)
 	for _, want := range []string{"missionctl ui", "09:30", "overdue", "enter", "Groceries", "115%", "▌", "Toasts",
-		"Saved 3 transactions", "yesterday", "3d ago", "Spotify", "…", "+3,200.00", "✓", "Nerd Font:"} {
+		"Saved 3 transactions", "yesterday", "3d ago", "Spotify", "…", "+3,200.00", "✓", "Nerd Font:", "╭─ Tasks", "Insights", "POSTS 12", "1h 05m", "borders: rounded"} {
 		if !strings.Contains(text, want) {
 			t.Errorf("demo missing %q:\n%s", want, text)
 		}

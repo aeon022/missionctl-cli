@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"charm.land/lipgloss/v2"
 	"github.com/aeon022/missionctl-core/ui"
 	"github.com/spf13/cobra"
 )
@@ -68,6 +69,15 @@ func renderUIDemo(title string, now time.Time) string {
 		line := fmt.Sprintf("%-10s %-30s %s", ui.RelTime(r.when, now), ui.MidEllipsis(r.title, 30), ui.Money(r.amt, 12))
 		b.WriteString(ui.Row(demoWidth, i == 1, line) + "\n")
 	}
+
+	sec("Panels (title in the border; focused = accent), tabs, durations")
+	left := ui.Panel(34, 6, "Tasks", ui.Row(30, true, "buy milk  "+ui.Pill("today", ui.Warn))+"\n"+ui.Row(30, false, "call mom"), true)
+	right := ui.Panel(34, 6, "Insights", "Groceries "+ui.Bar(14, 0.62, true)+"\nDining    "+ui.Bar(14, 0.91, true), false)
+	b.WriteString(lipgloss.JoinHorizontal(lipgloss.Top, left, " ", right) + "\n")
+	b.WriteString(ui.Tabs(demoWidth, []string{"DASHBOARD", "POSTS", "QUEUE", "HISTORY", "STATS"}, 1, []int{0, 12, 3}) + "\n")
+	fmt.Fprintf(&b, "%s  %s  %s  %s  %s\n", ui.Duration(45*time.Second), ui.Duration(12*time.Minute),
+		ui.Duration(2*time.Hour), ui.Duration(65*time.Minute), ui.Duration(27*time.Hour))
+	fmt.Fprintf(&b, "borders: %s (MISSIONCTL_BORDERS=rounded|sharp|none)\n", ui.Borders())
 
 	sec("Icons")
 	b.WriteString("unicode: ")
