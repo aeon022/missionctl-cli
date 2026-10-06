@@ -93,7 +93,7 @@ regains focus (at most every 5 seconds). A card turns amber/red when something
 needs attention (overdue tasks, a blown budget goal).
 
 **Choosing cards**: create `dashboard.yaml` in missionctl's config directory
-(`~/Library/Application Support/missionctl/` on macOS) to show only some cards,
+(`~/.config/missionctl/`) to show only some cards,
 in your order:
 
 ```yaml
@@ -183,7 +183,7 @@ attention:
 
 Each banner fires only once (event: per event, habit: per day, digest: per day);
 what was announced is remembered for 48 hours in `notified.json` in
-`~/Library/Application Support/missionctl/`. `--dry-run` prints what would be
+`~/.config/missionctl/`. `--dry-run` prints what would be
 announced and neither posts nor remembers anything.
 
 Run it automatically every 5 minutes:

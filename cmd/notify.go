@@ -82,8 +82,7 @@ func pruneSeen(seen map[string]time.Time, now time.Time) {
 }
 
 func notifyStatePath() string {
-	dir, _ := os.UserConfigDir()
-	return filepath.Join(dir, "missionctl", "notified.json")
+	return filepath.Join(suiteConfigDir(), "notified.json")
 }
 
 func loadSeen(path string) map[string]time.Time {

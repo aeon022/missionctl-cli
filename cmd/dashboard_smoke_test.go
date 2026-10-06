@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"os"
 	"strings"
 	"testing"
 	"time"
@@ -435,5 +436,27 @@ func TestDashboardDrillDownEdgeCases(t *testing.T) {
 	mi, _ = m.Update(tea.KeyPressMsg{Text: "d", Code: 'd'})
 	if mi.(dashboardModel).showDrill {
 		t.Error("no peek popup over the agenda view")
+	}
+}
+
+func TestLoadCardIDsFromSuiteConfigDir(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	if got := loadCardIDs(); got != nil {
+		t.Errorf("no file → nil (default: all cards), got %v", got)
+	}
+	dir := home + "/.config/missionctl"
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(dir+"/dashboard.yaml", []byte("cards: [tasks, habits]\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	got := loadCardIDs()
+	if len(got) != 2 || got[0] != "tasks" || got[1] != "habits" {
+		t.Errorf("loadCardIDs = %v", got)
+	}
+	if want := dir + "/notified.json"; notifyStatePath() != want {
+		t.Errorf("notify state lives next to theme.yaml: %s, want %s", notifyStatePath(), want)
 	}
 }

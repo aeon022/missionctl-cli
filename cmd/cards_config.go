@@ -40,15 +40,25 @@ func filterCards(all []dashboardCard, ids []string) []dashboardCard {
 	return out
 }
 
-// loadCardIDs reads `cards:` from <config dir>/missionctl/dashboard.yaml.
+// suiteConfigDir is ~/.config/missionctl — the same place theme.yaml lives,
+// on every OS (os.UserConfigDir would put it under Library on macOS).
+func suiteConfigDir() string {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return ""
+	}
+	return filepath.Join(home, ".config", "missionctl")
+}
+
+// loadCardIDs reads `cards:` from ~/.config/missionctl/dashboard.yaml.
 // A missing or unreadable file just means the default (all cards).
 func loadCardIDs() []string {
-	dir, err := os.UserConfigDir()
-	if err != nil {
+	dir := suiteConfigDir()
+	if dir == "" {
 		return nil
 	}
 	s := coreconfig.NewStore("dashboard")
-	s.AddPath(filepath.Join(dir, "missionctl"))
+	s.AddPath(dir)
 	if s.Read() != nil {
 		return nil
 	}
