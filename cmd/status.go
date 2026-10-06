@@ -136,7 +136,34 @@ func runStatus(_ *cobra.Command, _ []string) error {
 	return nil
 }
 
+// taskStatus is taskStatusBase plus a 7-day sparkline of completed tasks.
 func taskStatus() cardStatus {
+	s := taskStatusBase()
+	if !strings.HasPrefix(s.text, "–") {
+		s.spark = taskSpark(time.Now())
+	}
+	return s
+}
+
+func taskSpark(now time.Time) []float64 {
+	var all struct {
+		Data []struct {
+			CompletedAt *time.Time `json:"completed_at"`
+		} `json:"data"`
+	}
+	if !runToolJSON("taskctl", []string{"list", "--all", "--json"}, &all) {
+		return nil
+	}
+	var pts []datedValue
+	for _, t := range all.Data {
+		if t.CompletedAt != nil {
+			pts = append(pts, datedValue{*t.CompletedAt, 1})
+		}
+	}
+	return dailyBuckets(now, 7, pts)
+}
+
+func taskStatusBase() cardStatus {
 	var resp struct {
 		Overdue  int `json:"overdue"`
 		DueToday int `json:"due_today"`
@@ -169,7 +196,15 @@ func taskStatus() cardStatus {
 	case resp.DueToday > 0:
 		urgency = urgencyWarn
 	}
-	return cardStatus{text: summary, urgency: urgency}
+	var items []string
+	for _, t := range resp.Data {
+		line := t.Title
+		if t.DueDate != nil {
+			line += "  · due " + t.DueDate.Format("Jan 2")
+		}
+		items = append(items, line)
+	}
+	return cardStatus{text: summary, urgency: urgency, items: items}
 }
 
 func calStatus(now time.Time) cardStatus {
@@ -190,25 +225,63 @@ func calStatus(now time.Time) cardStatus {
 	if resp.Count == 1 {
 		summary = "1 event today"
 	}
+	var items []string
+	for _, e := range resp.Data {
+		items = append(items, e.StartTime.Format("15:04")+"  "+e.Title)
+	}
 	for _, e := range resp.Data {
 		if e.StartTime.After(now) {
-			return cardStatus{text: fmt.Sprintf("%s\nnext: %s at %s", summary, e.Title, e.StartTime.Format("15:04"))}
+			return cardStatus{text: fmt.Sprintf("%s\nnext: %s at %s", summary, e.Title, e.StartTime.Format("15:04")), items: items}
 		}
 	}
-	return cardStatus{text: summary}
+	return cardStatus{text: summary, items: items}
 }
 
-func timerStatus(_ time.Time) cardStatus {
+func timerStatus(now time.Time) cardStatus {
+	s := timerStatusBase()
+	if !strings.HasPrefix(s.text, "–") {
+		var log struct {
+			Entries []struct {
+				StartedAt time.Time `json:"started_at"`
+				Seconds   float64   `json:"duration_seconds"`
+			} `json:"entries"`
+		}
+		if runToolJSON("timectl", []string{"log", "--json", "-d", "7"}, &log) {
+			var pts []datedValue
+			for _, e := range log.Entries {
+				pts = append(pts, datedValue{e.StartedAt, e.Seconds / 60})
+			}
+			s.spark = dailyBuckets(now, 7, pts)
+		}
+	}
+	return s
+}
+
+func timerStatusBase() cardStatus {
 	var resp struct {
 		TotalHuman string `json:"total_human"`
 		Entries    []struct {
-			Task    string `json:"task"`
-			Project string `json:"project"`
-			Running bool   `json:"running"`
+			Task          string `json:"task"`
+			Project       string `json:"project"`
+			Running       bool   `json:"running"`
+			DurationHuman string `json:"duration_human"`
 		} `json:"entries"`
 	}
 	if !runToolJSON("timectl", []string{"today", "--json"}, &resp) {
 		return cardStatus{text: "–  not configured"}
+	}
+	var items []string
+	for _, e := range resp.Entries {
+		line := e.Task
+		if e.Project != "" {
+			line += " (" + e.Project + ")"
+		}
+		if e.Running {
+			line += "  · running"
+		} else if e.DurationHuman != "" {
+			line += "  · " + e.DurationHuman
+		}
+		items = append(items, line)
 	}
 	todayLine := fmt.Sprintf("%s today", resp.TotalHuman)
 	for _, e := range resp.Entries {
@@ -217,10 +290,10 @@ func timerStatus(_ time.Time) cardStatus {
 			if e.Project != "" {
 				task = fmt.Sprintf("%s (%s)", e.Task, e.Project)
 			}
-			return cardStatus{text: "running: " + task + "\n" + todayLine}
+			return cardStatus{text: "running: " + task + "\n" + todayLine, items: items}
 		}
 	}
-	return cardStatus{text: "no timer running\n" + todayLine}
+	return cardStatus{text: "no timer running\n" + todayLine, items: items}
 }
 
 func diaryStatus() cardStatus {
@@ -322,15 +395,23 @@ func habitStatus(_ time.Time) cardStatus {
 		return cardStatus{text: "no habits tracked"}
 	}
 	summary := fmt.Sprintf("%d/%d done today", resp.Done, resp.Total)
+	var items []string
+	for _, h := range resp.Data {
+		mark := "○ "
+		if h.CheckedToday {
+			mark = "✓ "
+		}
+		items = append(items, mark+h.Name)
+	}
 	if resp.Done == resp.Total {
-		return cardStatus{text: summary + "\nall done! 🎉"}
+		return cardStatus{text: summary + "\nall done! 🎉", items: items}
 	}
 	for _, h := range resp.Data {
 		if !h.CheckedToday {
-			return cardStatus{text: summary + "\nnext: " + h.Name}
+			return cardStatus{text: summary + "\nnext: " + h.Name, items: items}
 		}
 	}
-	return cardStatus{text: summary}
+	return cardStatus{text: summary, items: items}
 }
 
 func noteStatus(now time.Time) cardStatus {
@@ -354,10 +435,18 @@ func noteStatus(now time.Time) cardStatus {
 		summary = fmt.Sprintf("%s · %d created today", summary, createdToday)
 	}
 
-	var lastTitle sql.NullString
-	_ = db.QueryRow(`SELECT title FROM notes ORDER BY mod_time DESC LIMIT 1`).Scan(&lastTitle)
-	if lastTitle.Valid && lastTitle.String != "" {
-		return cardStatus{text: summary + "\nlatest: " + lastTitle.String}
+	var items []string
+	if rows, err := db.Query(`SELECT title FROM notes WHERE title != '' ORDER BY mod_time DESC LIMIT 12`); err == nil {
+		for rows.Next() {
+			var t sql.NullString
+			if rows.Scan(&t) == nil && t.Valid {
+				items = append(items, t.String)
+			}
+		}
+		rows.Close()
+	}
+	if len(items) > 0 {
+		return cardStatus{text: summary + "\nlatest: " + items[0], items: items}
 	}
 	return cardStatus{text: summary}
 }

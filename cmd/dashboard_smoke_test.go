@@ -328,3 +328,112 @@ func TestDashboardWithThreeCards(t *testing.T) {
 		t.Error("2 must jump to the second visible card (habits)")
 	}
 }
+
+func loadedDashboard(t *testing.T) dashboardModel {
+	t.Helper()
+	m := newDashboardModel()
+	m.width, m.height = 100, 30
+	vals := make([]cardStatus, len(dashboardCards))
+	vals[0] = cardStatus{text: "2 due today\nSteuer", items: []string{"Steuer  · due Oct 6", "Rechnung"}, spark: []float64{0, 1, 0, 2, 0, 0, 3}}
+	vals[1] = cardStatus{text: "no events today"} // no items
+	mi, _ := m.Update(cardsLoadedMsg{values: vals, at: time.Now()})
+	return mi.(dashboardModel)
+}
+
+func TestDashboardSparklineShownOnCard(t *testing.T) {
+	m := loadedDashboard(t)
+	out := ansi.Strip(m.viewContent())
+	if !strings.Contains(out, sparkline([]float64{0, 1, 0, 2, 0, 0, 3})) {
+		t.Errorf("sparkline missing from the tasks card:\n%s", out)
+	}
+	// a sparkline must not change the card's height (same card, with and without)
+	with := lipgloss.Height(m.renderCard(0))
+	m.values[0].spark = nil
+	if without := lipgloss.Height(m.renderCard(0)); with != without {
+		t.Errorf("sparkline changed the card height: %d vs %d", with, without)
+	}
+}
+
+// Regression: lipgloss v2's Width() includes border and padding, so sizing the
+// card body to w-2 wrapped the [n] key badge onto its own row.
+func TestDashboardCardHeaderStaysOnOneLine(t *testing.T) {
+	m := loadedDashboard(t)
+	for _, width := range []int{60, 80, 100, 140} {
+		m.width = width
+		lines := strings.Split(ansi.Strip(m.renderCard(0)), "\n")
+		if !strings.Contains(lines[1], "Tasks") || !strings.Contains(lines[1], "[1]") {
+			t.Errorf("width %d: label and key badge must share the first body line, got %q", width, lines[1])
+		}
+		for _, l := range lines {
+			if lipgloss.Width(l) != m.cardWidth() {
+				t.Errorf("width %d: line %q is %d cells, card is %d", width, l, lipgloss.Width(l), m.cardWidth())
+			}
+		}
+	}
+}
+
+func TestDashboardDrillDownPopup(t *testing.T) {
+	m := loadedDashboard(t)
+	mi, cmd := m.Update(tea.KeyPressMsg{Text: "d", Code: 'd'})
+	m = mi.(dashboardModel)
+	if !m.showDrill || cmd != nil {
+		t.Fatalf("d opens the peek popup without launching: show=%v cmd=%v", m.showDrill, cmd != nil)
+	}
+	out := ansi.Strip(m.viewContent())
+	for _, want := range []string{"Tasks", "2 due today", "Steuer  · due Oct 6", "Rechnung", "enter open taskctl"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("popup missing %q:\n%s", want, out)
+		}
+	}
+	// esc (or any other key) closes without launching
+	mi, cmd = m.Update(tea.KeyPressMsg{Code: tea.KeyEscape})
+	if mi.(dashboardModel).showDrill || cmd != nil {
+		t.Error("esc must close the popup and do nothing else")
+	}
+	// enter closes AND launches the tool
+	mi, _ = m.Update(tea.KeyPressMsg{Text: "d", Code: 'd'})
+	mi, cmd = mi.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
+	if mi.(dashboardModel).showDrill || cmd == nil {
+		t.Errorf("enter closes and launches: show=%v cmd=%v", mi.(dashboardModel).showDrill, cmd != nil)
+	}
+}
+
+func TestDashboardDrillDownEdgeCases(t *testing.T) {
+	m := loadedDashboard(t)
+	// a card without items says so instead of showing an empty box
+	m.cursor = 1
+	mi, _ := m.Update(tea.KeyPressMsg{Text: "d", Code: 'd'})
+	if out := ansi.Strip(mi.(dashboardModel).viewContent()); !strings.Contains(out, "no item list for this card") {
+		t.Errorf("no-items card:\n%s", out)
+	}
+	// not loaded yet → loading…
+	fresh := newDashboardModel()
+	fresh.width, fresh.height = 100, 30
+	mi, _ = fresh.Update(tea.KeyPressMsg{Text: "d", Code: 'd'})
+	if out := ansi.Strip(mi.(dashboardModel).viewContent()); !strings.Contains(out, "loading…") {
+		t.Errorf("unloaded card:\n%s", out)
+	}
+	// long lists are capped
+	many := make([]string, 30)
+	for i := range many {
+		many[i] = "item " + strings.Repeat("x", i%3)
+	}
+	m = loadedDashboard(t)
+	m.values[0].items = many
+	m.cursor = 0
+	mi, _ = m.Update(tea.KeyPressMsg{Text: "d", Code: 'd'})
+	if out := ansi.Strip(mi.(dashboardModel).viewContent()); !strings.Contains(out, "…and 18 more") {
+		t.Errorf("cap at %d items missing:\n%s", drillMaxItems, out)
+	}
+	// space peeks too; the agenda view has no peek
+	m = loadedDashboard(t)
+	mi, _ = m.Update(tea.KeyPressMsg{Code: tea.KeySpace, Text: " "})
+	if !mi.(dashboardModel).showDrill {
+		t.Error("space must open the peek popup")
+	}
+	m.showAgenda = true
+	mi, _ = m.Update(tea.KeyPressMsg{Text: "d", Code: 'd'})
+	if mi.(dashboardModel).showDrill {
+		t.Error("no peek popup over the agenda view")
+	}
+}

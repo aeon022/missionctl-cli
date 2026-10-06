@@ -172,6 +172,8 @@ const (
 type cardStatus struct {
 	text    string
 	urgency urgencyLevel
+	spark   []float64 // optional 7-day history, drawn as a sparkline on the card's detail line
+	items   []string  // optional lines for the "d" drill-down popup, from the same fetch
 }
 
 type dashboardModel struct {
@@ -187,6 +189,7 @@ type dashboardModel struct {
 	lastClick   int    // card of the previous left click, for double-click → launch
 	lastClickAt time.Time
 	showHelp    bool // "?" toggles the key reference popup
+	showDrill   bool // "d" opens a read-only list of the selected card's items
 
 	showSearch   bool // "/" opens the cross-tool search (see search.go)
 	searchInput  textinput.Model
@@ -281,13 +284,13 @@ func (m dashboardModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case tea.MouseMotionMsg:
 		m.hover = -1
-		if !m.showAgenda && !m.showSettings && !m.showHelp {
+		if !m.showAgenda && !m.showSettings && !m.showHelp && !m.showDrill {
 			m.hover = m.cardAt(msg.X, msg.Y)
 		}
 		return m, nil
 
 	case tea.MouseClickMsg:
-		if msg.Button != tea.MouseLeft || m.showAgenda || m.showSettings || m.showHelp {
+		if msg.Button != tea.MouseLeft || m.showAgenda || m.showSettings || m.showHelp || m.showDrill {
 			return m, nil
 		}
 		i := m.cardAt(msg.X, msg.Y)
@@ -349,6 +352,17 @@ func (m dashboardModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.showSearch {
 			return m.updateSearch(msg)
 		}
+		if m.showDrill {
+			// read-only popup: enter opens the tool, ctrl+c quits, anything else closes
+			m.showDrill = false
+			switch msg.String() {
+			case "ctrl+c":
+				return m, tea.Quit
+			case "enter":
+				return m, m.launch(dashboardCards[m.cursor].tool)
+			}
+			return m, nil
+		}
 		if m.showHelp {
 			// any key closes the popup; ctrl+c still quits
 			m.showHelp = false
@@ -360,6 +374,11 @@ func (m dashboardModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		switch msg.String() {
 		case "?":
 			m.showHelp = true
+			return m, nil
+		case "d", "space":
+			if !m.showAgenda {
+				m.showDrill = true
+			}
 			return m, nil
 		case "/":
 			if m.showAgenda {
@@ -622,6 +641,10 @@ func (m dashboardModel) cardAt(x, y int) int {
 func (m dashboardModel) renderCard(i int) string {
 	c := dashboardCards[i]
 	w := m.cardWidth()
+	// lipgloss v2: Width() includes the border (2) and the Padding(0,1) (2),
+	// so the usable interior is w-4 — sizing content to w-2 wrapped the key
+	// badge and any full-width line onto an extra row.
+	inner := w - 4
 	selected := i == m.cursor
 
 	var cardColor color.Color = c.color
@@ -646,9 +669,9 @@ func (m dashboardModel) renderCard(i int) string {
 	head := lipgloss.JoinHorizontal(lipgloss.Top,
 		titleStyle.Render(c.icon+" "+c.label),
 	)
-	headLine := lipgloss.NewStyle().Width(w - 2).Render(head)
+	headLine := lipgloss.NewStyle().Width(inner).Render(head)
 	// right-pad so the key badge lands flush right within the card interior
-	pad := (w - 2) - lipgloss.Width(head) - lipgloss.Width(keyBadge)
+	pad := (inner) - lipgloss.Width(head) - lipgloss.Width(keyBadge)
 	if pad < 1 {
 		pad = 1
 	}
@@ -668,24 +691,25 @@ func (m dashboardModel) renderCard(i int) string {
 	// text and should inherit the terminal's own default foreground, which
 	// is readable against that terminal's background by definition. The
 	// old hardcoded white ("255") broke exactly this on light themes.
-	summaryStyle := lipgloss.NewStyle().Width(w - 2)
+	summaryStyle := lipgloss.NewStyle().Width(inner)
 	if summaryLine == "" || strings.HasPrefix(summaryLine, "–") {
 		summaryStyle = summaryStyle.Foreground(dashSubtle)
 	}
-	valueBlock := summaryStyle.Render(truncate(summaryLine, w-2))
+	valueBlock := summaryStyle.Render(truncate(summaryLine, inner))
 	// Always emit a second line (blank if there's no detail) so every card
 	// is the same height — cards without one used to make lipgloss.JoinHorizontal
 	// misalign that row's bottom borders against its taller row-mate.
+	detailLine = withSpark(detailLine, value.spark, inner)
 	if detailLine != "" {
-		detailStyle := lipgloss.NewStyle().Foreground(dashSubtle).Width(w - 2)
-		valueBlock += "\n" + detailStyle.Render(truncate(detailLine, w-2))
+		detailStyle := lipgloss.NewStyle().Foreground(dashSubtle).Width(inner)
+		valueBlock += "\n" + detailStyle.Render(truncate(detailLine, inner))
 	} else {
 		valueBlock += "\n"
 	}
 
 	if age := syncAge(c.tool); age != "" {
-		ageStyle := lipgloss.NewStyle().Foreground(dashSubtle).Width(w - 2)
-		valueBlock += "\n" + ageStyle.Render(truncate("synced "+age, w-2))
+		ageStyle := lipgloss.NewStyle().Foreground(dashSubtle).Width(inner)
+		valueBlock += "\n" + ageStyle.Render(truncate("synced "+age, inner))
 	}
 
 	body := headLine + "\n" + valueBlock
@@ -795,7 +819,43 @@ func (m dashboardModel) viewContent() string {
 	if m.showHelp {
 		return overlay.Center(m.gridContent(), m.renderHelpPopup(), m.width, m.height, 0)
 	}
+	if m.showDrill {
+		return overlay.CenterDim(m.gridContent(), m.renderDrillPopup(), m.width, m.height, 0)
+	}
 	return m.gridContent()
+}
+
+const drillMaxItems = 12
+
+// renderDrillPopup lists the selected card's items — the same data the card
+// was built from, no second fetch — so you can look before jumping in.
+func (m dashboardModel) renderDrillPopup() string {
+	c := dashboardCards[m.cursor]
+	w := min(max(m.width-10, 30), 60)
+	title := lipgloss.NewStyle().Bold(true).Foreground(c.color).Render(c.icon + " " + c.label)
+
+	var lines []string
+	switch {
+	case !m.loaded[m.cursor]:
+		lines = []string{dashMutedStyle.Render("loading…")}
+	default:
+		v := m.values[m.cursor]
+		summary, _, _ := strings.Cut(v.text, "\n")
+		lines = append(lines, truncate(summary, w), "")
+		for i, it := range v.items {
+			if i == drillMaxItems {
+				lines = append(lines, dashMutedStyle.Render(fmt.Sprintf("…and %d more", len(v.items)-drillMaxItems)))
+				break
+			}
+			lines = append(lines, truncate(it, w))
+		}
+		if len(v.items) == 0 {
+			lines = append(lines, dashMutedStyle.Render("no item list for this card"))
+		}
+	}
+	foot := fmt.Sprintf("%s open %s   %s close", dashKeyStyle.Render("enter"), c.tool, dashKeyStyle.Render("esc"))
+	body := title + "\n\n" + strings.Join(lines, "\n") + "\n\n" + dashFootStyle.Render(foot)
+	return lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).BorderForeground(c.color).Padding(1, 2).Render(body)
 }
 
 func (m dashboardModel) renderHelpPopup() string {
@@ -804,6 +864,7 @@ func (m dashboardModel) renderHelpPopup() string {
 		Row("↑↓←→ / hjkl", "move between cards").
 		Row("1-9", "open that tool").
 		Row("enter", "open the selected tool").
+		Row("d / space", "peek: list the card's items without leaving").
 		Row("click / double-click", "select / open a card").
 		Section("Act").
 		Row("x", "quick action on the card (complete task, stop timer, check habit)").
@@ -902,8 +963,8 @@ func (m dashboardModel) gridContent() string {
 			loadHint = "  " + dashMutedStyle.Render("↻ refreshing…")
 		}
 		footer = fmt.Sprintf(
-			"%s move  %s open%s  %s search  %s sync  %s agenda  %s help  %s quit",
-			dashKeyStyle.Render("↑↓←→"), dashKeyStyle.Render("enter"), xHint,
+			"%s move  %s open  %s peek%s  %s search  %s sync  %s agenda  %s help  %s quit",
+			dashKeyStyle.Render("↑↓←→"), dashKeyStyle.Render("enter"), dashKeyStyle.Render("d"), xHint,
 			dashKeyStyle.Render("/"), dashKeyStyle.Render("s"), dashKeyStyle.Render("a"),
 			dashKeyStyle.Render("?"), dashKeyStyle.Render("q"),
 		) + loadHint
