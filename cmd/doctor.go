@@ -1,6 +1,8 @@
 package cmd
 
 import (
+	"context"
+	"database/sql"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -100,6 +102,9 @@ func runDoctor(cmd *cobra.Command, args []string) error {
 
 	fmt.Fprintln(cliOut)
 	checkDatabases(checkMark, dashMark, nameStyle, pathStyle)
+
+	fmt.Fprintln(cliOut)
+	checkToolSelfTests(checkMark, crossMark, dashMark, nameStyle, pathStyle)
 
 	fmt.Fprintln(cliOut)
 	checkDaemons(checkMark, crossMark, dashMark, nameStyle, pathStyle)
@@ -218,7 +223,83 @@ func checkDatabases(checkMark, dashMark string, nameStyle, pathStyle lipgloss.St
 			continue
 		}
 		age := time.Since(info.ModTime())
-		fmt.Fprintf(cliOut, "  %s %s  last synced %s\n", nameStyle.Render(name), checkMark, pathStyle.Render(formatAge(age)+" ago"))
+		line := fmt.Sprintf("  %s %s  last synced %s", nameStyle.Render(name), checkMark, pathStyle.Render(formatAge(age)+" ago"))
+		if res := sqliteQuickCheck(path); res != "ok" {
+			line = fmt.Sprintf("  %s %s  %s", nameStyle.Render(name), crossMark, "integrity check: "+res)
+		}
+		fmt.Fprintln(cliOut, line)
+	}
+}
+
+// sqliteQuickCheck runs PRAGMA quick_check on a database opened read-only and
+// returns "ok" or the first problem SQLite reports (or why it couldn't check).
+func sqliteQuickCheck(path string) string {
+	db, err := sql.Open("sqlite", "file:"+path+"?mode=ro")
+	if err != nil {
+		return err.Error()
+	}
+	defer db.Close()
+	var res string
+	if err := db.QueryRow(`PRAGMA quick_check`).Scan(&res); err != nil {
+		return err.Error()
+	}
+	return res
+}
+
+// runToolDoctor is variable so tests don't need the real tools installed.
+var runToolDoctor = func(ctx context.Context, tool string) ([]byte, error) {
+	return exec.CommandContext(ctx, tool, "doctor").CombinedOutput()
+}
+
+// toolDoctorVerdict runs `<tool> doctor` (5 s limit) and reduces it to
+// installed / ok / the first failing line. A tool is failing when it exits
+// non-zero or prints a ✗ line; the ✗ line (else the first output line) is
+// the reason shown.
+func toolDoctorVerdict(tool string) (installed, ok bool, reason string) {
+	if _, err := exec.LookPath(tool); err != nil {
+		return false, false, ""
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	out, err := runToolDoctor(ctx, tool)
+	var first string
+	for _, l := range strings.Split(string(out), "\n") {
+		l = strings.TrimSpace(l)
+		if l == "" {
+			continue
+		}
+		if first == "" {
+			first = l
+		}
+		if strings.HasPrefix(l, "✗") {
+			return true, false, l
+		}
+	}
+	if ctx.Err() != nil {
+		return true, false, "timed out after 5s"
+	}
+	if err != nil {
+		if first == "" {
+			first = err.Error()
+		}
+		return true, false, first
+	}
+	return true, true, ""
+}
+
+func checkToolSelfTests(checkMark, crossMark, dashMark string, nameStyle, pathStyle lipgloss.Style) {
+	fmt.Fprintln(cliOut, "  Tool self-checks (<tool> doctor):")
+	fmt.Fprintln(cliOut)
+	for _, name := range toolDBOrder {
+		installed, ok, reason := toolDoctorVerdict(name)
+		switch {
+		case !installed:
+			fmt.Fprintf(cliOut, "  %s %s  not installed\n", nameStyle.Render(name), dashMark)
+		case ok:
+			fmt.Fprintf(cliOut, "  %s %s  all checks passed\n", nameStyle.Render(name), checkMark)
+		default:
+			fmt.Fprintf(cliOut, "  %s %s  %s\n", nameStyle.Render(name), crossMark, pathStyle.Render(reason))
+		}
 	}
 }
 
