@@ -6,7 +6,7 @@ require (
 	charm.land/bubbles/v2 v2.1.1
 	charm.land/bubbletea/v2 v2.0.9
 	charm.land/lipgloss/v2 v2.0.6
-	github.com/aeon022/missionctl-core v0.0.0-20261005160025-b1f808ac13b6
+	github.com/aeon022/missionctl-core v0.0.0-20261006072217-27f17d902b56
 	github.com/charmbracelet/colorprofile v0.4.3
 	github.com/charmbracelet/x/ansi v0.11.8
 	github.com/spf13/cobra v1.10.2
