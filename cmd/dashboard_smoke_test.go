@@ -10,6 +10,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
 	"github.com/aeon022/missionctl-core/activity"
+	"github.com/aeon022/missionctl-core/theme"
 	"github.com/charmbracelet/x/ansi"
 )
 
@@ -613,5 +614,21 @@ func TestHeaderClockUsesDayMonthFormat(t *testing.T) {
 	m.now = time.Date(2026, 10, 6, 14, 4, 22, 0, time.Local)
 	if out := ansi.Strip(m.renderHeader()); !strings.Contains(out, "Tue 06 Oct · 14:04:22") {
 		t.Errorf("header clock: %q", out)
+	}
+}
+
+func TestTitleBadgeUsesThemeColorsNotAFixedPurple(t *testing.T) {
+	// the banner was a hardcoded 256-color purple with the theme's dark
+	// "on accent" text on it — unreadable in dark terminal themes
+	probe := lipgloss.NewStyle().Background(theme.BlueV2).Render("\x00")
+	bg := probe[:strings.Index(probe, "\x00")]
+	if !strings.Contains(dashTitleStyle.Render("MISSIONCTL"), bg) {
+		t.Errorf("the title badge must use the theme's accent (BlueV2) as background, not a fixed color")
+	}
+	for _, c := range allDashboardCards {
+		s := lipgloss.NewStyle().Foreground(c.color).Render("x")
+		if strings.Contains(s, "38;5;") && c.label != "" {
+			t.Errorf("card %q title color is a fixed 256-color value; use ANSI 0-15 so it follows the terminal theme", c.label)
+		}
 	}
 }

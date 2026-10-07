@@ -34,15 +34,17 @@ type dashboardCard struct {
 
 // allDashboardCards is every card the dashboard knows; dashboardCards is the
 // subset/order the user chose in dashboard.yaml (default: all).
+// Card title colors are ANSI palette entries (0-15), so they follow the
+// terminal theme like the default `terminal` preset does.
 var allDashboardCards = []dashboardCard{
-	{"1", "✓", "Tasks", "taskctl", lipgloss.Color("39"), func(_ time.Time) cardStatus { return taskStatus() }, quickCompleteTask},
-	{"2", "📅", "Calendar", "calctl", lipgloss.Color("42"), calStatus, nil},
-	{"3", "⏱", "Timer", "timectl", lipgloss.Color("221"), timerStatus, quickStopTimer},
-	{"4", "📔", "Diary", "diaryctl", lipgloss.Color("212"), func(_ time.Time) cardStatus { return diaryStatus() }, nil},
-	{"5", "💰", "Budget", "budgetctl", lipgloss.Color("208"), budgetStatus, nil},
-	{"6", "🔥", "Habits", "habctl", lipgloss.Color("79"), habitStatus, quickCheckHabit},
-	{"7", "📝", "Notes", "notectl", lipgloss.Color("135"), noteStatus, nil},
-	{"8", "✉", "Mail", "mailctl", lipgloss.Color("33"), func(_ time.Time) cardStatus { return mailStatus() }, nil},
+	{"1", "✓", "Tasks", "taskctl", lipgloss.Color("12"), func(_ time.Time) cardStatus { return taskStatus() }, quickCompleteTask},
+	{"2", "📅", "Calendar", "calctl", lipgloss.Color("10"), calStatus, nil},
+	{"3", "⏱", "Timer", "timectl", lipgloss.Color("11"), timerStatus, quickStopTimer},
+	{"4", "📔", "Diary", "diaryctl", lipgloss.Color("13"), func(_ time.Time) cardStatus { return diaryStatus() }, nil},
+	{"5", "💰", "Budget", "budgetctl", lipgloss.Color("3"), budgetStatus, nil},
+	{"6", "🔥", "Habits", "habctl", lipgloss.Color("14"), habitStatus, quickCheckHabit},
+	{"7", "📝", "Notes", "notectl", lipgloss.Color("5"), noteStatus, nil},
+	{"8", "✉", "Mail", "mailctl", lipgloss.Color("4"), func(_ time.Time) cardStatus { return mailStatus() }, nil},
 }
 
 var dashboardCards = filterCards(allDashboardCards, loadCardIDs())
@@ -580,7 +582,7 @@ var (
 	dashTitleStyle = lipgloss.NewStyle().
 			Bold(true).
 			Foreground(theme.OnAccentV2).
-			Background(lipgloss.Color("57")).
+			Background(theme.BlueV2).
 			Padding(0, 2)
 
 	dashTaglineStyle = lipgloss.NewStyle().Foreground(dashSubtle).Italic(true)
