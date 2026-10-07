@@ -30,7 +30,6 @@ func TestEachNotificationOnlyOnce(t *testing.T) {
 	c := notifyContext{Now: at(9, 55), Timed: []agendaItem{{when: at(10, 0), hasTime: true, text: "Standup"}}}
 	first := decideNotifications(c, nil)
 	seen := map[string]time.Time{first[0].Key: c.Now}
-	seen[got[0].Key] = c.Now
 	if again := decideNotifications(c, seen); len(again) != 0 {
 		t.Errorf("already announced, got %+v", again)
 	}
