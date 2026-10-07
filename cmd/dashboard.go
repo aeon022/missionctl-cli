@@ -6,6 +6,8 @@ import (
 	"image/color"
 	"os"
 	"os/exec"
+	"slices"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -45,9 +47,70 @@ var allDashboardCards = []dashboardCard{
 	{"6", "🔥", "Habits", "habctl", lipgloss.Color("14"), habitStatus, quickCheckHabit},
 	{"7", "📝", "Notes", "notectl", lipgloss.Color("5"), noteStatus, nil},
 	{"8", "✉", "Mail", "mailctl", lipgloss.Color("4"), func(_ time.Time) cardStatus { return mailStatus() }, nil},
+	{"9", "💊", "Health", "healthctl", lipgloss.Color("9"), healthStatus, nil},
+	{"", "📈", "Invest", "investctl", lipgloss.Color("2"), investStatus, nil},
 }
 
-var dashboardCards = filterCards(allDashboardCards, loadCardIDs())
+var dashboardCards = hideUninstalled(filterCards(allDashboardCards, loadCardIDs()), "healthctl", "investctl")
+
+// hideUninstalled drops the named tools' cards when their binary is missing —
+// these two are private-data tools most setups won't have.
+func hideUninstalled(cards []dashboardCard, tools ...string) []dashboardCard {
+	var out []dashboardCard
+	for i, c := range cards {
+		if slices.Contains(tools, c.tool) {
+			if _, err := exec.LookPath(c.tool); err != nil {
+				continue
+			}
+		}
+		if i < 9 {
+			c.key = strconv.Itoa(len(out) + 1)
+		}
+		out = append(out, c)
+	}
+	return out
+}
+
+// healthStatus shows counts only — never medication names on a shared screen.
+func healthStatus(_ time.Time) cardStatus {
+	var r struct {
+		Done, Total, Due int
+		Next             string
+	}
+	if !runToolJSON("healthctl", []string{"today", "--json"}, &r) {
+		return cardStatus{text: "–  not configured"}
+	}
+	if r.Total == 0 {
+		return cardStatus{text: "no doses today"}
+	}
+	text := fmt.Sprintf("%d/%d doses taken", r.Done, r.Total)
+	switch {
+	case r.Due > 0:
+		return cardStatus{text: text + fmt.Sprintf("\n%d due now", r.Due), urgency: urgencyWarn}
+	case r.Next != "":
+		return cardStatus{text: text + "\nnext " + r.Next}
+	}
+	return cardStatus{text: text + "\nall done"}
+}
+
+func investStatus(_ time.Time) cardStatus {
+	var r struct {
+		Data struct {
+			Totals []struct {
+				Currency         string
+				Value, DayChange float64
+			}
+		} `json:"data"`
+	}
+	if !runToolJSON("investctl", []string{"summary", "--json"}, &r) {
+		return cardStatus{text: "–  not configured"}
+	}
+	if len(r.Data.Totals) == 0 {
+		return cardStatus{text: "no holdings yet"}
+	}
+	t := r.Data.Totals[0]
+	return cardStatus{text: fmt.Sprintf("%.0f %s\nday %+.2f", t.Value, t.Currency, t.DayChange)}
+}
 
 // quickCompleteTask/quickCheckHabit/quickStopTimer re-fetch the same --json
 // data their card's status function already showed, act on the first

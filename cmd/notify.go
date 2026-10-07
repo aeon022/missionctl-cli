@@ -26,6 +26,7 @@ type notifyContext struct {
 	Timed    []agendaItem // today's scheduled items
 	Habits   []habitRisk  // not checked today, streak > 0
 	DueCount int          // tasks due today or overdue
+	DosesDue int          // healthctl doses due now; count only, never names
 }
 
 const (
@@ -69,6 +70,10 @@ func decideNotifications(c notifyContext, seen map[string]time.Time) []notificat
 	if c.Now.Hour() >= overdueDigestAt && c.DueCount > 0 {
 		add(notification{Key: "overdue|" + day, Title: "Tasks",
 			Body: fmt.Sprintf("%d task(s) due today or overdue", c.DueCount)})
+	}
+	if c.DosesDue > 0 {
+		add(notification{Key: fmt.Sprintf("dose|%s|%d", day, c.DosesDue), Title: "Medication",
+			Body: "medication due"})
 	}
 	return out
 }
@@ -124,6 +129,10 @@ func gatherNotifyContext(now time.Time) notifyContext {
 	}
 	if runToolJSON("taskctl", []string{"list", "--today", "--json"}, &tasks) {
 		c.DueCount = len(tasks.Data)
+	}
+	var doses struct{ Due int }
+	if _, err := exec.LookPath("healthctl"); err == nil && runToolJSON("healthctl", []string{"today", "--json"}, &doses) {
+		c.DosesDue = doses.Due
 	}
 	return c
 }

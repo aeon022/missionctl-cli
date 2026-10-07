@@ -30,6 +30,7 @@ func TestEachNotificationOnlyOnce(t *testing.T) {
 	c := notifyContext{Now: at(9, 55), Timed: []agendaItem{{when: at(10, 0), hasTime: true, text: "Standup"}}}
 	first := decideNotifications(c, nil)
 	seen := map[string]time.Time{first[0].Key: c.Now}
+	seen[got[0].Key] = c.Now
 	if again := decideNotifications(c, seen); len(again) != 0 {
 		t.Errorf("already announced, got %+v", again)
 	}
@@ -101,5 +102,18 @@ func TestNotifyPlist(t *testing.T) {
 	}
 	if strings.Contains(p, "KeepAlive") {
 		t.Error("an interval job must not be KeepAlive")
+	}
+}
+
+func TestDoseBannerIsGenericAndFiresOncePerCount(t *testing.T) {
+	c := notifyContext{Now: time.Date(2026, 10, 7, 8, 0, 0, 0, time.Local), DosesDue: 2}
+	seen := map[string]time.Time{}
+	got := decideNotifications(c, seen)
+	if len(got) != 1 || got[0].Body != "medication due" {
+		t.Fatalf("got %+v, want one generic 'medication due' banner", got)
+	}
+	seen[got[0].Key] = c.Now
+	if again := decideNotifications(c, seen); len(again) != 0 {
+		t.Errorf("same count must not re-notify: %+v", again)
 	}
 }
