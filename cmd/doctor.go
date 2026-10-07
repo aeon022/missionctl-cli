@@ -38,6 +38,8 @@ var tools = []tool{
 	{"diaryctl", "diaryctl"},
 	{"timectl", "timectl"},
 	{"habctl", "habctl"},
+	{"healthctl", "healthctl"},
+	{"investctl", "investctl"},
 }
 
 type envVar struct {
@@ -190,6 +192,8 @@ var toolDB = map[string]string{
 	"habctl":    "~/.local/share/habctl/habits.db",
 	"timectl":   "~/.local/share/timectl/time.db",
 	"diaryctl":  "~/.local/share/diaryctl/diary.db",
+	"healthctl": "~/.local/share/healthctl/healthctl.db",
+	"investctl": "~/.local/share/investctl/investctl.db",
 }
 
 // resolvedToolDBPath returns a tool's actual on-disk DB path, honoring its
@@ -209,7 +213,7 @@ func resolvedToolDBPath(tool string) string {
 }
 
 // toolDBOrder keeps the database status output in a stable, readable order.
-var toolDBOrder = []string{"mailctl", "calctl", "taskctl", "notectl", "budgetctl", "habctl", "timectl", "diaryctl"}
+var toolDBOrder = []string{"mailctl", "calctl", "taskctl", "notectl", "budgetctl", "habctl", "timectl", "diaryctl", "healthctl", "investctl"}
 
 func checkDatabases(checkMark, dashMark string, nameStyle, pathStyle lipgloss.Style) {
 	fmt.Fprintln(cliOut, "  Databases:")
