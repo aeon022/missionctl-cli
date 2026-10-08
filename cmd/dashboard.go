@@ -462,7 +462,10 @@ func (m dashboardModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.searchInput.SetValue("")
 			m.searchInput.Focus()
 			return m, nil
-		case "ctrl+c", "q", "esc":
+		case "esc":
+			m.showAgenda = false // esc never quits; q / ctrl+c do
+			return m, nil
+		case "ctrl+c", "q":
 			return m, tea.Quit
 		case "j", "down":
 			if !m.showAgenda && m.cursor+m.cols() < len(dashboardCards) {
@@ -674,12 +677,12 @@ const (
 	maxCardW  = 60
 )
 
-// colsFor is how many card columns fit: 1 below 70 cells, 2 up to 149, 3 from 150.
+// colsFor is how many card columns fit: 1 below 70 cells, 2 up to 119, 3 from 120.
 func colsFor(width int) int {
 	switch {
 	case width < 70:
 		return 1
-	case width < 150:
+	case width < 120:
 		return 2
 	}
 	return 3
@@ -762,7 +765,10 @@ func (m dashboardModel) renderCard(i int) string {
 		border = lipgloss.DoubleBorder()
 	}
 
-	keyBadge := lipgloss.NewStyle().Foreground(dashSubtle).Render("[" + c.key + "]")
+	keyBadge := ""
+	if c.key != "" {
+		keyBadge = lipgloss.NewStyle().Foreground(dashSubtle).Render("[" + c.key + "]")
+	}
 	head := lipgloss.JoinHorizontal(lipgloss.Top,
 		titleStyle.Render(c.icon+" "+c.label),
 	)
@@ -972,7 +978,7 @@ func (m dashboardModel) renderHelpPopup() string {
 		Row("L", "license settings").
 		Section("Other").
 		Row("?", "this help").
-		Row("q / esc", "quit")
+		Row("q", "quit")
 	return lipgloss.NewStyle().
 		Border(lipgloss.RoundedBorder()).BorderForeground(dashSubtle).
 		Padding(1, 2).Render(h.String())

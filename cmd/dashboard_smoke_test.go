@@ -465,7 +465,7 @@ func TestLoadCardIDsFromSuiteConfigDir(t *testing.T) {
 }
 
 func TestColsAndCardWidthByTerminalWidth(t *testing.T) {
-	for w, want := range map[int]int{20: 1, 69: 1, 70: 2, 100: 2, 149: 2, 150: 3, 220: 3} {
+	for w, want := range map[int]int{20: 1, 69: 1, 70: 2, 100: 2, 119: 2, 120: 3, 149: 3, 220: 3} {
 		if got := colsFor(w); got != want {
 			t.Errorf("colsFor(%d) = %d, want %d", w, got, want)
 		}
@@ -511,10 +511,13 @@ func TestThreeColumnsCursorAndHitTest(t *testing.T) {
 	if got := mi.(dashboardModel).cursor; got != 2 {
 		t.Errorf("l at the right edge must not wrap, got %d", got)
 	}
-	m.cursor = 6 // last row has only two cards: 6,7
+	last := len(dashboardCards) - 1 // card count depends on which tools are installed
+	m.cursor = last - last%3 // first card of the last row
 	mi, _ = m.Update(tea.KeyPressMsg{Text: "l", Code: 'l'})
-	mi, _ = mi.Update(tea.KeyPressMsg{Text: "l", Code: 'l'})
-	if got := mi.(dashboardModel).cursor; got != 7 {
+	for i := 0; i < 3; i++ {
+		mi, _ = mi.Update(tea.KeyPressMsg{Text: "l", Code: 'l'})
+	}
+	if got := mi.(dashboardModel).cursor; got != last {
 		t.Errorf("l stops at the last card, got %d", got)
 	}
 }
@@ -581,10 +584,10 @@ func TestTodayPanelHeightRules(t *testing.T) {
 
 func TestTodayPanelShowsAgendaAndActivityWhenThereIsRoom(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
-	m := dashAt(170, 40)
+	m := dashAt(170, 60)
 	out := ansi.Strip(m.viewContent())
 	if !strings.Contains(out, "Today") || !strings.Contains(out, "Recent activity") || !strings.Contains(out, "Nothing logged yet") {
-		t.Fatalf("Today panel missing at 170x40:\n%s", out)
+		t.Fatalf("Today panel missing at 170x60:\n%s", out)
 	}
 	if !strings.Contains(out, "loading…") && !strings.Contains(out, "Nothing scheduled") {
 		t.Errorf("agenda side must say loading or nothing scheduled:\n%s", out)
@@ -601,7 +604,7 @@ func TestTodayPanelShowsAgendaAndActivityWhenThereIsRoom(t *testing.T) {
 			t.Errorf("line %d is %d cells wide (> 170)", i, w)
 		}
 	}
-	if n := strings.Count(m.viewContent(), "\n"); n != 40 {
+	if n := strings.Count(m.viewContent(), "\n"); n != 60 {
 		t.Errorf("the view must fill exactly the terminal height, got %d lines", n)
 	}
 	if small := dashAt(100, 30); strings.Contains(ansi.Strip(small.viewContent()), "Recent activity") {
