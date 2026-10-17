@@ -657,3 +657,27 @@ func TestWidePostctlCardHasOwnRow(t *testing.T) {
 		t.Error("wide card shows its title bar")
 	}
 }
+
+func TestSmallTerminalScrollsInsteadOfDroppingToday(t *testing.T) {
+	m := dashAt(170, 30)
+	if m.maxScroll() == 0 {
+		t.Fatal("30 rows cannot fit cards + Today panels; expected scrollable body")
+	}
+	if lines := strings.Count(m.viewContent(), "\n"); lines > 30 {
+		t.Errorf("view is %d lines, taller than the 30-row terminal", lines)
+	}
+	mi, _ := m.Update(tea.KeyPressMsg{Text: "pgdown", Code: tea.KeyPgDown})
+	m = mi.(dashboardModel)
+	if m.effScroll() == 0 {
+		t.Error("page down scrolls")
+	}
+	if !strings.Contains(ansi.Strip(m.viewContent()), "Recent activity") {
+		t.Error("scrolled to the end, the Today panels are visible")
+	}
+	m.scroll = 0
+	m.cursor = len(dashboardCards) - 1
+	m.scroll = m.scrollTo(m.cursor)
+	if m.scrollTo(m.cursor) != m.effScroll() {
+		t.Error("scrollTo is stable")
+	}
+}

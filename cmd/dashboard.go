@@ -247,6 +247,7 @@ type cardStatus struct {
 }
 
 type dashboardModel struct {
+	scroll      int // first visible body line when the dashboard is taller than the terminal
 	forceH      int // >0: render cards at exactly this height (row alignment)
 	cursor      int
 	err         error
@@ -381,11 +382,17 @@ func (m dashboardModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.cursor, m.lastClick, m.lastClickAt = i, i, now
 		return m, nil
 
-	case tea.MouseMsg: // wheel etc. — swallowed on purpose
-		// The card grid always fits on screen — there's nothing to scroll.
-		// Without mouse capture enabled, a trackpad/wheel scroll gets
-		// translated by the terminal into arrow-key escapes instead, which
-		// used to jump the card cursor around unintentionally.
+	case tea.MouseWheelMsg: // scroll the body when it is taller than the terminal
+		if !m.showAgenda && !m.showSettings && !m.showHelp && !m.showDrill {
+			d := 3
+			if msg.Button == tea.MouseWheelUp {
+				d = -3
+			}
+			m.scroll = min(max(m.effScroll()+d, 0), m.maxScroll())
+		}
+		return m, nil
+
+	case tea.MouseMsg:
 		return m, nil
 
 	case tea.FocusMsg:
@@ -471,24 +478,37 @@ func (m dashboardModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		case "ctrl+c", "q":
 			return m, tea.Quit
+		case "pgdown", "pgup":
+			if !m.showAgenda {
+				d := m.bodyAvail() - 2
+				if msg.String() == "pgup" {
+					d = -d
+				}
+				m.scroll = min(max(m.effScroll()+d, 0), m.maxScroll())
+			}
+			return m, nil
 		case "j", "down":
 			if !m.showAgenda {
 				m.cursor = m.moveCursor(1, 0)
+				m.scroll = m.scrollTo(m.cursor)
 			}
 			return m, nil
 		case "k", "up":
 			if !m.showAgenda {
 				m.cursor = m.moveCursor(-1, 0)
+				m.scroll = m.scrollTo(m.cursor)
 			}
 			return m, nil
 		case "h", "left":
 			if !m.showAgenda {
 				m.cursor = m.moveCursor(0, -1)
+				m.scroll = m.scrollTo(m.cursor)
 			}
 			return m, nil
 		case "l", "right":
 			if !m.showAgenda {
 				m.cursor = m.moveCursor(0, 1)
+				m.scroll = m.scrollTo(m.cursor)
 			}
 			return m, nil
 		case "r":
@@ -730,6 +750,7 @@ func cardBorderColor(u urgencyLevel, selected bool) color.Color {
 func (m dashboardModel) cardAt(x, y int) int {
 	const gridTop = 4 // blank, banner, rule, blank
 	left := m.gridLeft()
+	y += m.effScroll()
 	top := gridTop
 	for _, row := range m.layoutRows() {
 		h, x0 := 0, left
@@ -1062,7 +1083,11 @@ func (m dashboardModel) renderHelpPopup() string {
 		Padding(1, 2).Render(h.String())
 }
 
-func (m dashboardModel) gridContent() string {
+// bodyAvail is the number of body lines that fit above the 4 pinned lines (blank, error, status, footer).
+func (m dashboardModel) bodyAvail() int { return m.height - 4 }
+
+// gridBody is header + cards + Today panels (or the agenda), before scrolling.
+func (m dashboardModel) gridBody() string {
 	var b strings.Builder
 
 	b.WriteString("\n" + m.renderHeader() + "\n\n")
@@ -1093,10 +1118,63 @@ func (m dashboardModel) gridContent() string {
 				cardsH++
 			}
 		}
-		if h := todayPanelHeight(m.height, cardsH, cols); h > 0 {
+		h := todayPanelHeight(m.height, cardsH, cols)
+		if h == 0 && cols >= 2 && m.height > 0 {
+			h = 8 // too small to fit everything: keep the panels and scroll instead
+		}
+		if h > 0 {
 			b.WriteString("\n" + m.renderTodayPanels(h, left) + "\n")
 		}
 	}
+	return b.String()
+}
+
+// maxScroll is how far the body can scroll (0 when it fits).
+func (m dashboardModel) maxScroll() int {
+	if m.height <= 0 {
+		return 0
+	}
+	n := strings.Count(m.gridBody(), "\n")
+	return max(n-m.bodyAvail(), 0)
+}
+
+func (m dashboardModel) effScroll() int { return min(max(m.scroll, 0), m.maxScroll()) }
+
+// scrollTo keeps card i fully visible (as far as the window allows).
+func (m dashboardModel) scrollTo(i int) int {
+	const gridTop = 4
+	top := gridTop
+	for _, row := range m.layoutRows() {
+		h := 0
+		for _, c := range row {
+			h = max(h, lipgloss.Height(m.renderCard(c)))
+		}
+		for _, c := range row {
+			if c == i {
+				sc := m.effScroll()
+				if top < sc {
+					sc = top - 1
+				} else if top+h > sc+m.bodyAvail() {
+					sc = top + h - m.bodyAvail()
+				}
+				return min(max(sc, 0), m.maxScroll())
+			}
+		}
+		top += h
+	}
+	return m.effScroll()
+}
+
+func (m dashboardModel) gridContent() string {
+	var b strings.Builder
+	body := m.gridBody()
+	if m.height > 0 {
+		if lines := strings.Split(strings.TrimSuffix(body, "\n"), "\n"); len(lines) > m.bodyAvail() {
+			sc := m.effScroll()
+			body = strings.Join(lines[sc:sc+m.bodyAvail()], "\n") + "\n"
+		}
+	}
+	b.WriteString(body)
 
 	b.WriteString("\n")
 	// Both lines below are written unconditionally (blank when there's
