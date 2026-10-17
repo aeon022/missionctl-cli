@@ -1064,6 +1064,7 @@ func (m dashboardModel) renderHelpPopup() string {
 	h := keymap.Bare().
 		Section("Navigate").
 		Row("↑↓←→ / hjkl", "move between cards").
+		Row("PgUp / PgDn / wheel", "scroll when the terminal is small").
 		Row("1-9", "open that tool").
 		Row("enter", "open the selected tool").
 		Row("d / space", "peek: list the card's items without leaving").
