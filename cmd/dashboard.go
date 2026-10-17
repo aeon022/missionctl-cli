@@ -49,9 +49,11 @@ var allDashboardCards = []dashboardCard{
 	{"8", "✉", "Mail", "mailctl", lipgloss.Color("4"), func(_ time.Time) cardStatus { return mailStatus() }, nil},
 	{"9", "💊", "Health", "healthctl", lipgloss.Color("9"), healthStatus, nil},
 	{"", "📈", "Invest", "investctl", lipgloss.Color("2"), investStatus, nil},
+	{"", "📣", "Posts", "postctl", lipgloss.Color("13"), postsStatus, nil},
+	{"", "🛰", "Publish", "postctl", lipgloss.Color("6"), postHealthStatus, nil},
 }
 
-var dashboardCards = hideUninstalled(filterCards(allDashboardCards, loadCardIDs()), "healthctl", "investctl")
+var dashboardCards = hideUninstalled(filterCards(allDashboardCards, loadCardIDs()), "healthctl", "investctl", "postctl")
 
 // hideUninstalled drops the named tools' cards when their binary is missing —
 // these two are private-data tools most setups won't have.
