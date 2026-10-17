@@ -1,8 +1,10 @@
 package cmd
 
 import (
+	"charm.land/lipgloss/v2"
 	"database/sql"
 	"fmt"
+	"github.com/aeon022/missionctl-core/theme"
 	"os"
 	"path/filepath"
 	"sort"
@@ -147,40 +149,104 @@ func postctlLine(p postctlPost, now time.Time) string {
 	return s
 }
 
-// postsStatus is the "Posts" card: what goes out next.
-func postsStatus(now time.Time) cardStatus {
+// postctlStatus feeds the wide postctl card: left column = what goes out next,
+// right column = queue counts and health. text/urgency drive the usual
+// border colour and the not-configured state.
+func postctlStatus(now time.Time) cardStatus {
 	d, ok := loadPostctl()
 	if !ok {
 		return cardStatus{text: "–  not configured"}
 	}
-	if len(d.upcoming) == 0 {
-		return cardStatus{text: fmt.Sprintf("nothing scheduled\n%d drafts", d.drafts)}
-	}
-	var items []string
+	st := cardStatus{text: fmt.Sprintf("%d scheduled", d.scheduled)}
 	for _, p := range d.upcoming[:min(len(d.upcoming), 12)] {
-		items = append(items, postctlLine(p, now)+" – "+p.title)
+		st.items = append(st.items, postctlLine(p, now)+" – "+p.title)
 	}
-	return cardStatus{
-		text:  "next " + postctlLine(d.upcoming[0], now) + fmt.Sprintf("\n%d scheduled · %d drafts", d.scheduled, d.drafts),
-		items: items,
+	for _, p := range d.upcoming[:min(len(d.upcoming), 3)] {
+		st.left = append(st.left, postctlLine(p, now))
 	}
-}
-
-// postHealthStatus is the "Publish" card: is anything stuck or failing.
-func postHealthStatus(now time.Time) cardStatus {
-	d, ok := loadPostctl()
-	if !ok {
-		return cardStatus{text: "–  not configured"}
+	if len(st.left) == 0 {
+		st.left = []string{"nothing scheduled"}
 	}
+	st.right = []string{fmt.Sprintf("%d scheduled · %d drafts", d.scheduled, d.drafts)}
 	last := "never posted"
 	if !d.lastPosted.IsZero() {
 		last = "last post " + ago(now.Sub(d.lastPosted))
 	}
 	switch {
 	case d.failed > 0:
-		return cardStatus{text: fmt.Sprintf("%d failed\n%s", d.failed, last), urgency: urgencyCritical}
+		st.urgency = urgencyCritical
+		st.right = append(st.right, fmt.Sprintf("✗ %d failed", d.failed), last)
 	case d.overdue > 0:
-		return cardStatus{text: fmt.Sprintf("%d overdue – scheduler running?\n%s", d.overdue, last), urgency: urgencyWarn}
+		st.urgency = urgencyWarn
+		st.right = append(st.right, fmt.Sprintf("⚠ %d overdue – scheduler running?", d.overdue), last)
+	default:
+		st.right = append(st.right, "✓ all clear", last)
 	}
-	return cardStatus{text: "all clear\n" + last}
+	return st
+}
+
+// renderWideCard is the postctl card: a full-row banner with a filled title
+// bar so it stands out from the plain per-tool cards.
+func (m dashboardModel) renderWideCard(i int) string {
+	c := dashboardCards[i]
+	w := m.cardWidthOf(i)
+	inner := w - 4
+	selected := i == m.cursor
+	v := m.values[i]
+
+	border := lipgloss.RoundedBorder()
+	switch {
+	case selected:
+		border = lipgloss.ThickBorder()
+	case i == m.hover:
+		border = lipgloss.DoubleBorder()
+	}
+	bc := cardBorderColor(v.urgency, selected)
+	if v.urgency == urgencyNormal && !selected {
+		bc = c.color // accent border even when idle: this card is the showpiece
+	}
+
+	bar := lipgloss.NewStyle().Bold(true).Foreground(theme.OnAccent).Background(c.color).Render(" " + c.icon + " POSTCTL ")
+	sub := lipgloss.NewStyle().Foreground(dashSubtle).Render("  social publishing")
+	head := bar + sub
+	if c.key != "" {
+		badge := lipgloss.NewStyle().Foreground(dashSubtle).Render("[" + c.key + "]")
+		head += strings.Repeat(" ", max(inner-lipgloss.Width(head)-lipgloss.Width(badge), 1)) + badge
+	}
+	rule := lipgloss.NewStyle().Foreground(dashSubtle).Render(strings.Repeat("─", inner))
+
+	if !m.loaded[i] || len(v.left) == 0 && len(v.right) == 0 {
+		msg := v.text
+		if !m.loaded[i] {
+			msg = "– loading…"
+		}
+		return lipgloss.NewStyle().Border(border).BorderForeground(bc).Padding(0, 1).Width(w).
+			Render(head + "\n" + rule + "\n" + lipgloss.NewStyle().Foreground(dashSubtle).Render(truncate(msg, inner)))
+	}
+
+	lw := inner * 3 / 5
+	rw := inner - lw - 2
+	label := lipgloss.NewStyle().Bold(true).Foreground(c.color)
+	col := func(title string, lines []string, width int) string {
+		out := label.Render(title)
+		for _, l := range lines {
+			out += "\n" + lipgloss.NewStyle().Width(width).Render(truncate(l, width))
+		}
+		return out
+	}
+	right := make([]string, len(v.right))
+	copy(right, v.right)
+	if len(right) > 1 {
+		switch v.urgency {
+		case urgencyCritical:
+			right[1] = dashErrStyle.Render(truncate(right[1], rw))
+		case urgencyWarn:
+			right[1] = lipgloss.NewStyle().Foreground(dashWarnColor).Render(truncate(right[1], rw))
+		default:
+			right[1] = dashOKStyle.Render(truncate(right[1], rw))
+		}
+	}
+	body := lipgloss.JoinHorizontal(lipgloss.Top, col("NEXT UP", v.left, lw), "  ", col("QUEUE", right, rw))
+	return lipgloss.NewStyle().Border(border).BorderForeground(bc).Padding(0, 1).Width(w).
+		Render(head + "\n" + rule + "\n" + body)
 }

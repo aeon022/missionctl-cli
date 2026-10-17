@@ -49,8 +49,7 @@ var allDashboardCards = []dashboardCard{
 	{"8", "✉", "Mail", "mailctl", lipgloss.Color("4"), func(_ time.Time) cardStatus { return mailStatus() }, nil},
 	{"9", "💊", "Health", "healthctl", lipgloss.Color("9"), healthStatus, nil},
 	{"", "📈", "Invest", "investctl", lipgloss.Color("2"), investStatus, nil},
-	{"", "📣", "Posts", "postctl", lipgloss.Color("13"), postsStatus, nil},
-	{"", "🛰", "Publish", "postctl", lipgloss.Color("6"), postHealthStatus, nil},
+	{"", "📣", "Postctl", "postctl", lipgloss.Color("13"), postctlStatus, nil},
 }
 
 var dashboardCards = hideUninstalled(filterCards(allDashboardCards, loadCardIDs()), "healthctl", "investctl", "postctl")
@@ -243,6 +242,8 @@ type cardStatus struct {
 	urgency urgencyLevel
 	spark   []float64 // optional 7-day history, drawn as a sparkline on the card's detail line
 	items   []string  // optional lines for the "d" drill-down popup, from the same fetch
+	left    []string  // wide card only: left column lines
+	right   []string  // wide card only: right column lines
 }
 
 type dashboardModel struct {
@@ -470,23 +471,23 @@ func (m dashboardModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case "ctrl+c", "q":
 			return m, tea.Quit
 		case "j", "down":
-			if !m.showAgenda && m.cursor+m.cols() < len(dashboardCards) {
-				m.cursor += m.cols()
+			if !m.showAgenda {
+				m.cursor = m.moveCursor(1, 0)
 			}
 			return m, nil
 		case "k", "up":
-			if !m.showAgenda && m.cursor-m.cols() >= 0 {
-				m.cursor -= m.cols()
+			if !m.showAgenda {
+				m.cursor = m.moveCursor(-1, 0)
 			}
 			return m, nil
 		case "h", "left":
-			if !m.showAgenda && m.cursor%m.cols() != 0 {
-				m.cursor--
+			if !m.showAgenda {
+				m.cursor = m.moveCursor(0, -1)
 			}
 			return m, nil
 		case "l", "right":
-			if !m.showAgenda && m.cursor%m.cols() != m.cols()-1 && m.cursor < len(dashboardCards)-1 {
-				m.cursor++
+			if !m.showAgenda {
+				m.cursor = m.moveCursor(0, 1)
 			}
 			return m, nil
 		case "r":
@@ -727,19 +728,20 @@ func cardBorderColor(u urgencyLevel, selected bool) color.Color {
 // cols() cards, centered at gridLeft(), each row as tall as its tallest card.
 func (m dashboardModel) cardAt(x, y int) int {
 	const gridTop = 4 // blank, banner, rule, blank
-	w, cols, left := m.cardWidth(), m.cols(), m.gridLeft()
+	left := m.gridLeft()
 	top := gridTop
-	for row := 0; row < len(dashboardCards); row += cols {
-		h := 0
-		for col := 0; col < cols && row+col < len(dashboardCards); col++ {
-			h = max(h, lipgloss.Height(m.renderCard(row+col)))
+	for _, row := range m.layoutRows() {
+		h, x0 := 0, left
+		for _, i := range row {
+			h = max(h, lipgloss.Height(m.renderCard(i)))
 		}
 		if y >= top && y < top+h {
-			for col := 0; col < cols && row+col < len(dashboardCards); col++ {
-				x0 := left + col*(w+len(cardGap))
+			for _, i := range row {
+				w := m.cardWidthOf(i)
 				if x >= x0 && x < x0+w {
-					return row + col
+					return i
 				}
+				x0 += w + len(cardGap)
 			}
 			return -1
 		}
@@ -748,8 +750,71 @@ func (m dashboardModel) cardAt(x, y int) int {
 	return -1
 }
 
+// wide cards (postctl) take a whole grid row of their own.
+func (c dashboardCard) wide() bool { return c.tool == "postctl" }
+
+// layoutRows groups card indices into grid rows: normal cards cols() per row,
+// each wide card alone in a full-width row.
+func (m dashboardModel) layoutRows() [][]int {
+	var rows [][]int
+	var cur []int
+	flush := func() {
+		if len(cur) > 0 {
+			rows = append(rows, cur)
+			cur = nil
+		}
+	}
+	for i, c := range dashboardCards {
+		if c.wide() {
+			flush()
+			rows = append(rows, []int{i})
+			continue
+		}
+		cur = append(cur, i)
+		if len(cur) == m.cols() {
+			flush()
+		}
+	}
+	flush()
+	return rows
+}
+
+func (m dashboardModel) cardWidthOf(i int) int {
+	if dashboardCards[i].wide() {
+		return m.cols()*m.cardWidth() + len(cardGap)*(m.cols()-1)
+	}
+	return m.cardWidth()
+}
+
+// moveCursor moves by rows (dr) or within a row (dc), keeping the column
+// where the target row is long enough.
+func (m dashboardModel) moveCursor(dr, dc int) int {
+	rows := m.layoutRows()
+	for r, row := range rows {
+		for c, i := range row {
+			if i != m.cursor {
+				continue
+			}
+			if dc != 0 {
+				if c+dc >= 0 && c+dc < len(row) {
+					return row[c+dc]
+				}
+				return m.cursor
+			}
+			if r+dr >= 0 && r+dr < len(rows) {
+				t := rows[r+dr]
+				return t[min(c, len(t)-1)]
+			}
+		}
+	}
+	return m.cursor
+}
+
 func (m dashboardModel) renderCard(i int) string {
 	c := dashboardCards[i]
+	if c.wide() {
+		return m.renderWideCard(i)
+	}
 	w := m.cardWidth()
 	// lipgloss v2: Width() includes the border (2) and the Padding(0,1) (2),
 	// so the usable interior is w-4 — sizing content to w-2 wrapped the key
@@ -997,13 +1062,13 @@ func (m dashboardModel) gridContent() string {
 		// grid: m.cols() cards per row (1/2/3 by width), centered at gridLeft()
 		cols, left := m.cols(), strings.Repeat(" ", m.gridLeft())
 		cardsH := 0
-		for row := 0; row < len(dashboardCards); row += cols {
+		for _, row := range m.layoutRows() {
 			var cells []string
-			for col := 0; col < cols && row+col < len(dashboardCards); col++ {
+			for col, i := range row {
 				if col > 0 {
 					cells = append(cells, cardGap)
 				}
-				cells = append(cells, m.renderCard(row+col))
+				cells = append(cells, m.renderCard(i))
 			}
 			rowBlock := lipgloss.JoinHorizontal(lipgloss.Top, cells...)
 			for _, l := range strings.Split(rowBlock, "\n") {

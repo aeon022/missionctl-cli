@@ -512,6 +512,9 @@ func TestThreeColumnsCursorAndHitTest(t *testing.T) {
 		t.Errorf("l at the right edge must not wrap, got %d", got)
 	}
 	last := len(dashboardCards) - 1 // card count depends on which tools are installed
+	if dashboardCards[last].wide() {
+		last-- // the wide postctl card sits in its own row
+	}
 	m.cursor = last - last%3 // first card of the last row
 	mi, _ = m.Update(tea.KeyPressMsg{Text: "l", Code: 'l'})
 	for i := 0; i < 3; i++ {
@@ -633,5 +636,26 @@ func TestTitleBadgeUsesThemeColorsNotAFixedPurple(t *testing.T) {
 		if strings.Contains(s, "38;5;") && c.label != "" {
 			t.Errorf("card %q title color is a fixed 256-color value; use ANSI 0-15 so it follows the terminal theme", c.label)
 		}
+	}
+}
+
+func TestWidePostctlCardHasOwnRow(t *testing.T) {
+	saved := dashboardCards
+	defer func() { dashboardCards = saved }()
+	dashboardCards = filterCards(allDashboardCards, []string{"tasks", "calendar", "timer", "postctl"})
+	m := dashAt(170, 40)
+	rows := m.layoutRows()
+	if len(rows) != 2 || len(rows[1]) != 1 || !dashboardCards[rows[1][0]].wide() {
+		t.Fatalf("want one normal row + one wide row, got %v", rows)
+	}
+	m.cursor = 1
+	if got := m.moveCursor(1, 0); got != 3 {
+		t.Errorf("down from the grid reaches the wide card, got %d", got)
+	}
+	if got := m.moveCursor(0, 1); got != 2 {
+		t.Errorf("right inside the grid, got %d", got)
+	}
+	if !strings.Contains(ansi.Strip(m.viewContent()), "POSTCTL") {
+		t.Error("wide card shows its title bar")
 	}
 }
