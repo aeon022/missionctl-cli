@@ -247,6 +247,7 @@ type cardStatus struct {
 }
 
 type dashboardModel struct {
+	forceH      int // >0: render cards at exactly this height (row alignment)
 	cursor      int
 	err         error
 	width       int
@@ -750,28 +751,34 @@ func (m dashboardModel) cardAt(x, y int) int {
 	return -1
 }
 
-// wide cards (postctl) take a whole grid row of their own.
+// wide cards (postctl) span two grid slots.
 func (c dashboardCard) wide() bool { return c.tool == "postctl" }
 
-// layoutRows groups card indices into grid rows: normal cards cols() per row,
-// each wide card alone in a full-width row.
+func (m dashboardModel) wideSpan() int { return min(2, m.cols()) }
+
+// layoutRows groups card indices into grid rows of cols() slots; a wide card
+// takes wideSpan() slots and shares a row with the cards before it if it fits.
 func (m dashboardModel) layoutRows() [][]int {
 	var rows [][]int
 	var cur []int
+	used := 0
 	flush := func() {
 		if len(cur) > 0 {
 			rows = append(rows, cur)
-			cur = nil
+			cur, used = nil, 0
 		}
 	}
 	for i, c := range dashboardCards {
+		span := 1
 		if c.wide() {
+			span = m.wideSpan()
+		}
+		if used+span > m.cols() {
 			flush()
-			rows = append(rows, []int{i})
-			continue
 		}
 		cur = append(cur, i)
-		if len(cur) == m.cols() {
+		used += span
+		if used == m.cols() {
 			flush()
 		}
 	}
@@ -781,7 +788,8 @@ func (m dashboardModel) layoutRows() [][]int {
 
 func (m dashboardModel) cardWidthOf(i int) int {
 	if dashboardCards[i].wide() {
-		return m.cols()*m.cardWidth() + len(cardGap)*(m.cols()-1)
+		n := m.wideSpan()
+		return n*m.cardWidth() + len(cardGap)*(n-1)
 	}
 	return m.cardWidth()
 }
@@ -889,6 +897,9 @@ func (m dashboardModel) renderCard(i int) string {
 		BorderForeground(borderColor).
 		Padding(0, 1).
 		Width(w)
+	if m.forceH > 0 {
+		box = box.Height(m.forceH)
+	}
 
 	return box.Render(body)
 }
@@ -1064,11 +1075,17 @@ func (m dashboardModel) gridContent() string {
 		cardsH := 0
 		for _, row := range m.layoutRows() {
 			var cells []string
+			rowH := 0
+			for _, i := range row {
+				rowH = max(rowH, lipgloss.Height(m.renderCard(i)))
+			}
+			mm := m
+			mm.forceH = rowH
 			for col, i := range row {
 				if col > 0 {
 					cells = append(cells, cardGap)
 				}
-				cells = append(cells, m.renderCard(i))
+				cells = append(cells, mm.renderCard(i))
 			}
 			rowBlock := lipgloss.JoinHorizontal(lipgloss.Top, cells...)
 			for _, l := range strings.Split(rowBlock, "\n") {

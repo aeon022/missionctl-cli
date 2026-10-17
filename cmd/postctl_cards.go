@@ -220,8 +220,11 @@ func (m dashboardModel) renderWideCard(i int) string {
 		if !m.loaded[i] {
 			msg = "– loading…"
 		}
-		return lipgloss.NewStyle().Border(border).BorderForeground(bc).Padding(0, 1).Width(w).
-			Render(head + "\n" + rule + "\n" + lipgloss.NewStyle().Foreground(dashSubtle).Render(truncate(msg, inner)))
+		box := lipgloss.NewStyle().Border(border).BorderForeground(bc).Padding(0, 1).Width(w)
+		if m.forceH > 0 {
+			box = box.Height(m.forceH)
+		}
+		return box.Render(head + "\n" + rule + "\n" + lipgloss.NewStyle().Foreground(dashSubtle).Render(truncate(msg, inner)))
 	}
 
 	lw := inner * 3 / 5
@@ -247,6 +250,9 @@ func (m dashboardModel) renderWideCard(i int) string {
 		}
 	}
 	body := lipgloss.JoinHorizontal(lipgloss.Top, col("NEXT UP", v.left, lw), "  ", col("QUEUE", right, rw))
-	return lipgloss.NewStyle().Border(border).BorderForeground(bc).Padding(0, 1).Width(w).
-		Render(head + "\n" + rule + "\n" + body)
+	box := lipgloss.NewStyle().Border(border).BorderForeground(bc).Padding(0, 1).Width(w)
+	if m.forceH > 0 {
+		box = box.Height(m.forceH)
+	}
+	return box.Render(head + "\n" + rule + "\n" + body)
 }

@@ -512,10 +512,8 @@ func TestThreeColumnsCursorAndHitTest(t *testing.T) {
 		t.Errorf("l at the right edge must not wrap, got %d", got)
 	}
 	last := len(dashboardCards) - 1 // card count depends on which tools are installed
-	if dashboardCards[last].wide() {
-		last-- // the wide postctl card sits in its own row
-	}
-	m.cursor = last - last%3 // first card of the last row
+	rows := m.layoutRows()
+	m.cursor = rows[len(rows)-1][0] // first card of the last row
 	mi, _ = m.Update(tea.KeyPressMsg{Text: "l", Code: 'l'})
 	for i := 0; i < 3; i++ {
 		mi, _ = mi.Update(tea.KeyPressMsg{Text: "l", Code: 'l'})
