@@ -12,8 +12,23 @@ import (
 
 var updateCmd = &cobra.Command{
 	Use:   "update",
-	Short: "Pull latest source and rebuild every tool via its setup.sh",
-	RunE:  runUpdate,
+	Short: "Update every tool: git pull + rebuild for source checkouts, verified release binaries otherwise",
+	Long: `Tools with a source checkout under ~/Developing/Projects/missionctl are updated with git pull + setup.sh.
+Tools without one are updated from their latest GitHub release: the archive for this platform is downloaded,
+its SHA-256 is checked against the release's checksums.txt, and the binary replaces the installed one.
+Builds from source ("dev") are never overwritten by a release.
+
+  missionctl update             update everything
+  missionctl update --check     only report what would be updated
+  missionctl update --binaries  use releases even where a source checkout exists`,
+	RunE: runUpdate,
+}
+
+var updateCheckOnly, updateBinaries bool
+
+func init() {
+	updateCmd.Flags().BoolVar(&updateCheckOnly, "check", false, "only report available updates, change nothing")
+	updateCmd.Flags().BoolVar(&updateBinaries, "binaries", false, "update from GitHub releases even where a source checkout exists")
 }
 
 func runUpdate(cmd *cobra.Command, args []string) error {
@@ -24,8 +39,23 @@ func runUpdate(cmd *cobra.Command, args []string) error {
 
 	for _, t := range tools {
 		toolPath := filepath.Join(root, t.project)
-		if _, err := os.Stat(filepath.Join(toolPath, ".git")); err != nil {
-			fmt.Fprintf(cliOut, "  %s %s  no local checkout, skipped\n", nameStyle.Render(t.name), crossMark)
+		if _, err := os.Stat(filepath.Join(toolPath, ".git")); err != nil || updateBinaries {
+			msg, err := updateFromRelease(cmd.Context(), newReleaseClient(), t.name, updateCheckOnly)
+			switch {
+			case err != nil:
+				fmt.Fprintf(cliOut, "  %s %s  %s\n", nameStyle.Render(t.name), crossMark, err)
+				if !strings.Contains(err.Error(), "no release published yet") {
+					failed = append(failed, t.name)
+				}
+			default:
+				fmt.Fprintf(cliOut, "  %s %s  %s\n", nameStyle.Render(t.name), checkMark, msg)
+				updated++
+			}
+			continue
+		}
+		if updateCheckOnly {
+			fmt.Fprintf(cliOut, "  %s %s  source checkout — `missionctl update` pulls and rebuilds\n", nameStyle.Render(t.name), checkMark)
+			updated++
 			continue
 		}
 
@@ -47,7 +77,11 @@ func runUpdate(cmd *cobra.Command, args []string) error {
 	}
 
 	fmt.Fprintln(cliOut)
-	fmt.Fprintf(cliOut, "  %d/%d tools updated\n", updated, len(tools))
+	verb := "updated"
+	if updateCheckOnly {
+		verb = "checked"
+	}
+	fmt.Fprintf(cliOut, "  %d/%d tools %s\n", updated, len(tools), verb)
 	fmt.Fprintln(cliOut)
 
 	if len(failed) > 0 {
