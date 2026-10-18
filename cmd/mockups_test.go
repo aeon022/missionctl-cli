@@ -9,6 +9,7 @@ import (
 
 	"charm.land/lipgloss/v2"
 	"github.com/aeon022/missionctl-core/activity"
+	"github.com/aeon022/missionctl-core/theme"
 )
 
 // TestRenderLandingMockups writes an ANSI screenshot of the real dashboard (fictional demo data) for
@@ -50,37 +51,49 @@ func TestRenderLandingMockups(t *testing.T) {
 			left:  []string{"tomorrow 17:30 · IG (studio)", "tomorrow 18:00 · Threads (studio)", "Mon 09:00 · LinkedIn (studio)"},
 			right: []string{"9 scheduled · 2 drafts", "✓ all clear", "last post 3h ago"}},
 	}
-	m := newDashboardModel()
-	m.width, m.height = 130, 44
-	vals := make([]cardStatus, len(dashboardCards))
-	for i, c := range dashboardCards {
-		vals[i] = demo[c.label]
-	}
-	at := func(h, mi int) time.Time {
-		return time.Date(now.Year(), now.Month(), now.Day(), h, mi, 0, 0, now.Location())
-	}
-	ev := []activity.Event{
-		{Time: at(8, 40), Tool: "habctl", Action: "checked", Title: "Morning run"},
-		{Time: at(9, 5), Tool: "taskctl", Action: "completed", Title: "Reply to agency"},
-		{Time: at(9, 31), Tool: "timectl", Action: "started", Title: "Landing page"},
-		{Time: at(11, 2), Tool: "notectl", Action: "wrote", Title: "Roadmap Q4"},
-		{Time: at(12, 10), Tool: "postctl", Action: "published", Title: "Summer menu — teaser"},
-	}
-	mi, _ := m.Update(cardsLoadedMsg{values: vals, at: now, activity: ev})
-	mi, _ = mi.(dashboardModel).Update(agendaLoadedMsg{
-		allDay: []agendaItem{{icon: "📅", color: lipgloss.Color("42"), text: "Offsite planning"}},
-		timed: []agendaItem{
-			{when: at(9, 30), hasTime: true, icon: "📅", color: lipgloss.Color("42"), text: "Team standup"},
-			{when: at(11, 0), hasTime: true, icon: "✓", color: lipgloss.Color("39"), text: "Prepare invoice for Nordlicht"},
-			{when: at(14, 0), hasTime: true, icon: "📅", color: lipgloss.Color("42"), text: "Client call — redesign"},
-			{when: at(16, 30), hasTime: true, icon: "⏱", color: lipgloss.Color("221"), text: "Focus block"},
-		},
-	})
-	out := mi.(dashboardModel).View().Content
-	if err := os.MkdirAll(dir, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(dir, "dashboard.ansi"), []byte(out), 0o644); err != nil {
-		t.Fatal(err)
+	// the same dashboard in a few built-in themes (landing page: live theme switching)
+	orig := theme.Current()
+	defer func() { _ = theme.Apply(orig) }()
+	for _, name := range []string{orig, "nord", "dracula", "gruvbox"} {
+		if err := theme.Apply(name); err != nil {
+			t.Fatal(err)
+		}
+		fname := "dashboard-" + name + ".ansi"
+		if name == orig {
+			fname = "dashboard.ansi"
+		}
+		m := newDashboardModel()
+		m.width, m.height = 130, 44
+		vals := make([]cardStatus, len(dashboardCards))
+		for i, c := range dashboardCards {
+			vals[i] = demo[c.label]
+		}
+		at := func(h, mi int) time.Time {
+			return time.Date(now.Year(), now.Month(), now.Day(), h, mi, 0, 0, now.Location())
+		}
+		ev := []activity.Event{
+			{Time: at(8, 40), Tool: "habctl", Action: "checked", Title: "Morning run"},
+			{Time: at(9, 5), Tool: "taskctl", Action: "completed", Title: "Reply to agency"},
+			{Time: at(9, 31), Tool: "timectl", Action: "started", Title: "Landing page"},
+			{Time: at(11, 2), Tool: "notectl", Action: "wrote", Title: "Roadmap Q4"},
+			{Time: at(12, 10), Tool: "postctl", Action: "published", Title: "Summer menu — teaser"},
+		}
+		mi, _ := m.Update(cardsLoadedMsg{values: vals, at: now, activity: ev})
+		mi, _ = mi.(dashboardModel).Update(agendaLoadedMsg{
+			allDay: []agendaItem{{icon: "📅", color: lipgloss.Color("42"), text: "Offsite planning"}},
+			timed: []agendaItem{
+				{when: at(9, 30), hasTime: true, icon: "📅", color: lipgloss.Color("42"), text: "Team standup"},
+				{when: at(11, 0), hasTime: true, icon: "✓", color: lipgloss.Color("39"), text: "Prepare invoice for Nordlicht"},
+				{when: at(14, 0), hasTime: true, icon: "📅", color: lipgloss.Color("42"), text: "Client call — redesign"},
+				{when: at(16, 30), hasTime: true, icon: "⏱", color: lipgloss.Color("221"), text: "Focus block"},
+			},
+		})
+		out := mi.(dashboardModel).View().Content
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(dir, fname), []byte(out), 0o644); err != nil {
+			t.Fatal(err)
+		}
 	}
 }

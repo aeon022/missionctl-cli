@@ -48,8 +48,8 @@ var allDashboardCards = []dashboardCard{
 	{"7", "📝", "Notes", "notectl", lipgloss.Color("5"), noteStatus, nil},
 	{"8", "✉", "Mail", "mailctl", lipgloss.Color("4"), func(_ time.Time) cardStatus { return mailStatus() }, nil},
 	{"9", "💊", "Health", "healthctl", lipgloss.Color("9"), healthStatus, nil},
-	{"", "📈", "Invest", "investctl", lipgloss.Color("2"), investStatus, nil},
-	{"", "📣", "Postctl", "postctl", lipgloss.Color("13"), postctlStatus, nil},
+	{"0", "📈", "Invest", "investctl", lipgloss.Color("2"), investStatus, nil},
+	{"p", "📣", "Postctl", "postctl", lipgloss.Color("13"), postctlStatus, nil},
 }
 
 var dashboardCards = hideUninstalled(filterCards(allDashboardCards, loadCardIDs()), "healthctl", "investctl", "postctl")
@@ -372,6 +372,10 @@ func (m dashboardModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		i := m.cardAt(msg.X, msg.Y)
 		if i < 0 {
+			if m.inTodayPanel(msg.X, msg.Y) { // clicking the Today panel opens the full agenda, like "a"
+				m.showAgenda, m.agendaLoad = true, true
+				return m, loadAgendaCmd()
+			}
 			return m, nil
 		}
 		now := time.Now()
@@ -784,6 +788,34 @@ func (m dashboardModel) cardAt(x, y int) int {
 	return -1
 }
 
+// inTodayPanel reports whether the terminal cell (x, y) lies on the "Today" panel under the cards
+// (same geometry as gridBody: header block, card rows, one blank line, then the panels).
+func (m dashboardModel) inTodayPanel(x, y int) bool {
+	if m.showAgenda {
+		return false
+	}
+	cardsH := 0
+	for _, row := range m.layoutRows() {
+		rowH := 0
+		for _, i := range row {
+			rowH = max(rowH, lipgloss.Height(m.renderCard(i)))
+		}
+		cardsH += rowH
+	}
+	h := todayPanelHeight(m.height, cardsH, m.cols())
+	if h == 0 && m.cols() >= 2 && m.height > 0 {
+		h = 8
+	}
+	if h <= 0 {
+		return false
+	}
+	total := m.cols()*m.cardWidth() + len(cardGap)*(m.cols()-1)
+	lw := (total - 1) / 2
+	top := 4 + cardsH + 1
+	y += m.effScroll()
+	return x >= m.gridLeft() && x < m.gridLeft()+lw && y >= top && y < top+h
+}
+
 // wide cards (postctl) span two grid slots.
 func (c dashboardCard) wide() bool { return c.tool == "postctl" }
 
@@ -1077,10 +1109,10 @@ func (m dashboardModel) renderHelpPopup() string {
 		Section("Navigate").
 		Row("↑↓←→ / hjkl", "move between cards").
 		Row("PgUp / PgDn / wheel", "scroll when the terminal is small").
-		Row("1-9", "open that tool").
+		Row("1-9, 0, p", "open that tool (0 = investctl, p = postctl)").
 		Row("enter", "open the selected tool").
 		Row("d / space", "peek: list the card's items without leaving").
-		Row("click / double-click", "select / open a card").
+		Row("click / double-click", "select / open a card; click Today for the agenda").
 		Section("Act").
 		Row("x", "quick action on the card (complete task, stop timer, check habit)").
 		Row("s", "sync all tools").
