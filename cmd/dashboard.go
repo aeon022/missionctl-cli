@@ -271,7 +271,8 @@ type dashboardModel struct {
 	searchHits   []SearchHit
 	searchCursor int
 	now          time.Time
-	actionMsg    string // result of the last "x" quick action, cleared on next action/refresh
+	health       []string // quiet problems (stale syncs, expiring tokens), refreshed with the cards
+	actionMsg    string   // result of the last "x" quick action, cleared on next action/refresh
 	actionBusy   bool
 	syncFailed   []string // syncableTools entries whose step errored, accumulated across a sync-all run
 
@@ -417,6 +418,7 @@ func (m dashboardModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case cardsLoadedMsg:
+		m.health = healthIssues(time.Now())
 		m.activity = msg.activity
 		m.values = msg.values
 		for i := range m.loaded {
@@ -1234,6 +1236,8 @@ func (m dashboardModel) gridContent() string {
 	errLine := ""
 	if m.err != nil {
 		errLine = dashErrStyle.Render("⚠ last launch failed: " + m.err.Error())
+	} else if hl := healthLine(m.health); hl != "" {
+		errLine = lipgloss.NewStyle().Foreground(dashWarnColor).Render(truncate(hl, max(m.width-len(rowIndent)-1, 20)))
 	}
 	b.WriteString(rowIndent + errLine + "\n")
 
