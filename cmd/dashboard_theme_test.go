@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"strings"
 	"testing"
 	"time"
 
@@ -8,23 +9,27 @@ import (
 	"github.com/aeon022/missionctl-core/theme"
 )
 
-func TestDashboardThemeKeySwitchesLiveAndSaves(t *testing.T) {
+func TestDashboardThemeKeyOpensPickerWithLivePreview(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
 	orig := theme.Current()
 	t.Cleanup(func() { _ = theme.Apply(orig) })
 
 	m := newDashboardModel()
+	m.width, m.height = 120, 40
 	before := dashKeyStyle.GetForeground()
 	mi, _ := m.Update(tea.KeyPressMsg{Text: "T", Code: 'T'})
-
-	if theme.Current() == orig {
-		t.Fatalf("T must switch to the next theme, still %q", orig)
+	m = mi.(dashboardModel)
+	if !strings.Contains(m.View().Content, "Colour theme") {
+		t.Fatal("T opens the theme popup")
 	}
-	if dashKeyStyle.GetForeground() == before {
-		t.Error("cached styles must be rebuilt when the theme changes")
+	mi, _ = m.Update(tea.KeyPressMsg{Text: "j", Code: 'j'})
+	m = mi.(dashboardModel)
+	if theme.Current() == orig || dashKeyStyle.GetForeground() == before {
+		t.Error("moving in the popup previews the theme live and rebuilds the cached styles")
 	}
+	mi, _ = m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
 	if got := mi.(dashboardModel).actionMsg; got != "Theme: "+theme.Current() {
-		t.Errorf("a short confirmation should name the theme, got %q", got)
+		t.Errorf("enter confirms the theme, got %q", got)
 	}
 }
 

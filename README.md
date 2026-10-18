@@ -82,7 +82,7 @@ while a tool runs and refreshes when it exits.
 | `/` | Search across all tools (see below) |
 | `?` | Key reference popup (any key closes it) |
 | `L` | License settings (activate a Bundle key for every tool at once) |
-| `T` | Next colour theme — switches live and is saved for the whole suite |
+| `T` | Colour theme picker — previews live, enter keeps it for the whole suite |
 | `q` / `esc` | Quit |
 
 **Mouse**: click selects a card, a quick second click (double-click) opens its

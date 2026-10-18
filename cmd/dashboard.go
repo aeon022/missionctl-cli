@@ -3,6 +3,7 @@ package cmd
 import (
 	"context"
 	"fmt"
+	"github.com/aeon022/missionctl-core/themepicker"
 	"image/color"
 	"os"
 	"os/exec"
@@ -271,8 +272,9 @@ type dashboardModel struct {
 	searchHits   []SearchHit
 	searchCursor int
 	now          time.Time
-	health       []string // quiet problems (stale syncs, expiring tokens), refreshed with the cards
-	actionMsg    string   // result of the last "x" quick action, cleared on next action/refresh
+	themePicker  themepicker.Picker // the "T" popup
+	health       []string           // quiet problems (stale syncs, expiring tokens), refreshed with the cards
+	actionMsg    string             // result of the last "x" quick action, cleared on next action/refresh
 	actionBusy   bool
 	syncFailed   []string // syncableTools entries whose step errored, accumulated across a sync-all run
 
@@ -436,6 +438,12 @@ func (m dashboardModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, tickEvery(time.Second)
 
 	case tea.KeyPressMsg:
+		if m.themePicker.IsOpen() { // the "T" popup owns the keyboard while it is open
+			if text := m.themePicker.Key(msg.String()); text != "" {
+				m.actionMsg = text
+			}
+			return m, nil
+		}
 		if m.showSettings {
 			return m.updateSettings(msg)
 		}
@@ -554,12 +562,8 @@ func (m dashboardModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.syncFailed = nil
 			m.actionMsg = syncStepLabel(0)
 			return m, syncStepCmd(0)
-		case "T": // live theme switch; the choice is saved for every suite tool
-			if name, err := theme.Cycle(); err != nil {
-				m.actionMsg = "Theme: " + err.Error()
-			} else {
-				m.actionMsg = "Theme: " + name
-			}
+		case "T": // theme picker with live preview; the choice is saved for every suite tool
+			m.themePicker.Open()
 			return m, nil
 		case "L":
 			if m.showAgenda {
@@ -1049,7 +1053,11 @@ func (m dashboardModel) renderAgenda() string {
 }
 
 func (m dashboardModel) View() tea.View {
-	v := tea.NewView(m.viewContent())
+	content := m.viewContent()
+	if m.themePicker.IsOpen() { // not dimmed: the live preview behind the popup is the point
+		content = overlay.Center(content, m.themePicker.View(), m.width, m.height, 0)
+	}
+	v := tea.NewView(content)
 	// v1's WithAltScreen/WithMouseCellMotion Program options are per-View fields in v2.
 	v.AltScreen = true
 	v.MouseMode = tea.MouseModeCellMotion
@@ -1122,7 +1130,7 @@ func (m dashboardModel) renderHelpPopup() string {
 		Row("a", "today's agenda").
 		Row("/", "search across all tools").
 		Row("L", "license settings").
-		Row("T", "next colour theme (saved for the whole suite)").
+		Row("T", "colour theme picker with live preview (saved for the whole suite)").
 		Section("Other").
 		Row("?", "this help").
 		Row("q", "quit")
