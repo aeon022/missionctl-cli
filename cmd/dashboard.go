@@ -1280,9 +1280,9 @@ func (m dashboardModel) gridContent() string {
 			loadHint = "  " + dashMutedStyle.Render("↻ refreshing…")
 		}
 		footer = fmt.Sprintf(
-			"%s move  %s open  %s peek%s  %s search  %s sync  %s agenda  %s help  %s quit",
+			"%s move  %s open  %s peek%s  %s search  %s sync  %s agenda  %s theme  %s help  %s quit",
 			dashKeyStyle.Render("↑↓←→"), dashKeyStyle.Render("enter"), dashKeyStyle.Render("d"), xHint,
-			dashKeyStyle.Render("/"), dashKeyStyle.Render("s"), dashKeyStyle.Render("a"),
+			dashKeyStyle.Render("/"), dashKeyStyle.Render("s"), dashKeyStyle.Render("a"), dashKeyStyle.Render("T"),
 			dashKeyStyle.Render("?"), dashKeyStyle.Render("q"),
 		) + loadHint
 	}
