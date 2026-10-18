@@ -31,10 +31,16 @@ func filterCards(all []dashboardCard, ids []string) []dashboardCard {
 		out = append(out, all...)
 	}
 	for i := range out {
-		if i < 9 {
+		switch {
+		case i < 9:
 			out[i].key = strconv.Itoa(i + 1)
-		} else {
-			out[i].key = "" // only 1-9 are single-key jumps
+		case i == 9:
+			out[i].key = "0"
+		default:
+			out[i].key = "" // beyond ten cards: arrows + enter or click
+		}
+		if out[i].tool == "postctl" && i >= 9 { // wide postctl card always answers to "p"
+			out[i].key = "p"
 		}
 	}
 	return out

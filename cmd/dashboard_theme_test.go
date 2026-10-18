@@ -28,10 +28,14 @@ func TestDashboardThemeKeySwitchesLiveAndSaves(t *testing.T) {
 	}
 }
 
-func TestInvestAndPostctlCardsHaveKeys(t *testing.T) {
-	for _, c := range allDashboardCards {
-		if c.key == "" {
-			t.Errorf("card %q has no jump key", c.label)
+func TestTenthAndPostctlCardsGetJumpKeys(t *testing.T) {
+	cards := filterCards(allDashboardCards, nil) // all 11 cards
+	if cards[9].key != "0" {
+		t.Errorf("10th card key = %q, want 0", cards[9].key)
+	}
+	for _, c := range cards[9:] {
+		if c.tool == "postctl" && c.key != "p" {
+			t.Errorf("postctl card key = %q, want p", c.key)
 		}
 	}
 }
