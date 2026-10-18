@@ -548,6 +548,13 @@ func (m dashboardModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.syncFailed = nil
 			m.actionMsg = syncStepLabel(0)
 			return m, syncStepCmd(0)
+		case "T": // live theme switch; the choice is saved for every suite tool
+			if name, err := theme.Cycle(); err != nil {
+				m.actionMsg = "Theme: " + err.Error()
+			} else {
+				m.actionMsg = "Theme: " + name
+			}
+			return m, nil
 		case "L":
 			if m.showAgenda {
 				return m, nil
@@ -663,36 +670,41 @@ func (m dashboardModel) launch(tool string) tea.Cmd {
 var cliOut = colorprofile.NewWriter(os.Stdout, os.Environ())
 
 var (
-	dashMuted         = theme.MutedV2
-	dashSubtle        = theme.SubtleV2
-	dashErrColor      = theme.RedV2
-	dashWarnColor     = theme.AmberV2
-	dashCriticalColor = theme.RedV2
+	dashMuted, dashSubtle, dashErrColor, dashWarnColor, dashCriticalColor color.Color
 
-	dashTitleStyle = lipgloss.NewStyle().
-			Bold(true).
-			Foreground(theme.OnAccentV2).
-			Background(theme.BlueV2).
-			Padding(0, 2)
-
-	dashTaglineStyle = lipgloss.NewStyle().Foreground(dashSubtle).Italic(true)
-	dashRuleStyle    = lipgloss.NewStyle().Foreground(dashSubtle)
-	dashClockStyle   = lipgloss.NewStyle().Foreground(dashMuted)
-	dashFootStyle    = lipgloss.NewStyle().Foreground(dashSubtle)
-	dashKeyStyle     = lipgloss.NewStyle().Foreground(theme.AmberV2).Bold(true)
-	dashErrStyle     = lipgloss.NewStyle().Foreground(dashErrColor).Bold(true)
-	dashOKStyle      = lipgloss.NewStyle().Foreground(theme.GreenV2).Bold(true)
-	dashMutedStyle   = lipgloss.NewStyle().Foreground(dashMuted)
+	dashTitleStyle, dashTaglineStyle, dashRuleStyle, dashClockStyle, dashFootStyle lipgloss.Style
+	dashKeyStyle, dashErrStyle, dashOKStyle, dashMutedStyle                        lipgloss.Style
 
 	// checkMark/crossMark/dashMark/nameStyle: the ✓/✗/– status marks and
 	// name-column width shared by doctor/install/update/license/settings'
 	// per-tool status lines — previously redeclared identically in each of
 	// those files.
+	checkMark, crossMark, dashMark string
+	nameStyle                      = lipgloss.NewStyle().Width(14)
+)
+
+func init() {
+	refreshStyles()
+	theme.OnChange(refreshStyles)
+}
+
+// refreshStyles builds every cached colour and style from the active theme (live theme switching).
+func refreshStyles() {
+	dashMuted, dashSubtle, dashErrColor, dashWarnColor, dashCriticalColor = theme.MutedV2, theme.SubtleV2, theme.RedV2, theme.AmberV2, theme.RedV2
+
+	dashTitleStyle = lipgloss.NewStyle().Bold(true).Foreground(theme.OnAccentV2).Background(theme.BlueV2).Padding(0, 2)
+	dashTaglineStyle = lipgloss.NewStyle().Foreground(dashSubtle).Italic(true)
+	dashRuleStyle = lipgloss.NewStyle().Foreground(dashSubtle)
+	dashClockStyle = lipgloss.NewStyle().Foreground(dashMuted)
+	dashFootStyle = lipgloss.NewStyle().Foreground(dashSubtle)
+	dashKeyStyle = lipgloss.NewStyle().Foreground(theme.AmberV2).Bold(true)
+	dashErrStyle = lipgloss.NewStyle().Foreground(dashErrColor).Bold(true)
+	dashOKStyle = lipgloss.NewStyle().Foreground(theme.GreenV2).Bold(true)
+	dashMutedStyle = lipgloss.NewStyle().Foreground(dashMuted)
 	checkMark = dashOKStyle.Render("✓")
 	crossMark = dashErrStyle.Render("✗")
-	dashMark  = lipgloss.NewStyle().Foreground(dashSubtle).Render("–")
-	nameStyle = lipgloss.NewStyle().Width(14)
-)
+	dashMark = lipgloss.NewStyle().Foreground(dashSubtle).Render("–")
+}
 
 const (
 	rowIndent = "  "
@@ -1076,6 +1088,7 @@ func (m dashboardModel) renderHelpPopup() string {
 		Row("a", "today's agenda").
 		Row("/", "search across all tools").
 		Row("L", "license settings").
+		Row("T", "next colour theme (saved for the whole suite)").
 		Section("Other").
 		Row("?", "this help").
 		Row("q", "quit")
