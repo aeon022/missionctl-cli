@@ -38,7 +38,7 @@ func stubTools(t *testing.T, outs map[string]string) {
 			t.Fatal(err)
 		}
 	}
-	t.Setenv("PATH", dir+":"+os.Getenv("PATH"))
+	t.Setenv("PATH", dir+":/usr/bin:/bin") // never the real tools
 }
 
 func TestBuildAgendaItems(t *testing.T) {
@@ -242,7 +242,7 @@ func stubScript(t *testing.T, name, body string) {
 	if err := os.WriteFile(filepath.Join(dir, name), []byte("#!/bin/sh\n"+body+"\n"), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	t.Setenv("PATH", dir+":"+os.Getenv("PATH"))
+	t.Setenv("PATH", dir+":/usr/bin:/bin") // never the real tools
 }
 
 func TestBudgetStatus(t *testing.T) {
