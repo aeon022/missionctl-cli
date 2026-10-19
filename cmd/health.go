@@ -32,6 +32,34 @@ func staleSyncIssues(tools []string, mtime func(tool string) (time.Time, bool), 
 	return out
 }
 
+// conflictCopyIssues reports sync-conflict copies of a tool's database (Dropbox "conflicted copy", Dutch/German
+// variants like "in Konflikt stehende Kopie"). They appear when two computers write the same SQLite file and
+// are a sign that the real database may be at risk. Only *.db files next to the tool's own database count.
+func conflictCopyIssues(tools []string, dbPath func(tool string) string) []string {
+	var out []string
+	for _, t := range tools {
+		path := dbPath(t)
+		entries, err := os.ReadDir(filepath.Dir(path))
+		if err != nil {
+			continue
+		}
+		n := 0
+		for _, e := range entries {
+			name := strings.ToLower(e.Name())
+			if e.Name() == filepath.Base(path) || !strings.HasSuffix(name, ".db") {
+				continue
+			}
+			if strings.Contains(name, "conflict") || strings.Contains(name, "konflikt") {
+				n++
+			}
+		}
+		if n > 0 {
+			out = append(out, fmt.Sprintf("%s: %d sync-conflict copies of the database (only one computer should write it at a time)", t, n))
+		}
+	}
+	return out
+}
+
 // igTokenIssues reads token_issued of the Instagram-Login token from postctl config files (profile → path).
 // Tokens last 60 days and the scheduler refreshes them from day 30, so beyond 45 days something is wrong.
 func igTokenIssues(cfgs map[string]string, now time.Time) []string {
@@ -86,6 +114,7 @@ func healthIssues(now time.Time) []string {
 		}
 		return info.ModTime(), true
 	}, now)
+	out = append(out, conflictCopyIssues(toolDBOrder, func(tool string) string { return expandHome(resolvedToolDBPath(tool)) })...)
 	cfgs := map[string]string{}
 	if home, err := os.UserHomeDir(); err == nil {
 		cfgs[""] = filepath.Join(home, ".config", "postctl", "config.yaml")

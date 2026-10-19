@@ -53,3 +53,21 @@ func TestHealthLineIsSilentWhenHealthy(t *testing.T) {
 		t.Error("no issues → no line; issues → one ⚠ line")
 	}
 }
+
+func TestConflictCopyIssues(t *testing.T) {
+	dir := t.TempDir()
+	for _, f := range []string{"budget.db", "budget (iMac in Konflikt stehende Kopie 2026-09-02).db", "budget (Mac's conflicted copy 2026-09-03).db", "notes.txt", "other.db"} {
+		if err := os.WriteFile(filepath.Join(dir, f), nil, 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	got := conflictCopyIssues([]string{"budgetctl", "habctl"}, func(tool string) string {
+		if tool == "budgetctl" {
+			return filepath.Join(dir, "budget.db")
+		}
+		return filepath.Join(t.TempDir(), "habits.db") // clean directory: nothing to report
+	})
+	if len(got) != 1 || !strings.Contains(got[0], "budgetctl: 2 sync-conflict copies") {
+		t.Errorf("got %v", got)
+	}
+}
