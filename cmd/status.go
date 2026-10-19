@@ -296,7 +296,10 @@ func timerStatusBase() cardStatus {
 	return cardStatus{text: "no timer running\n" + todayLine, items: items}
 }
 
-func diaryStatus() cardStatus {
+func diaryStatus() cardStatus { return diaryStatusAt(time.Now()) }
+
+// diaryStatusAt compares the last entry's date with the local calendar day of now.
+func diaryStatusAt(now time.Time) cardStatus {
 	db, err := openDB(resolvedToolDBPath("diaryctl"))
 	if err != nil || db == nil {
 		return cardStatus{text: "–  not configured"}
@@ -318,8 +321,10 @@ func diaryStatus() cardStatus {
 	if err != nil {
 		return cardStatus{text: "no entries"}
 	}
-	today := time.Now().Truncate(24 * time.Hour)
-	diff := today.Sub(t.Truncate(24 * time.Hour))
+	// entry dates are plain calendar days: compare against today's local date, not the UTC one
+	// (Truncate(24h) used the UTC date, so between 00:00 and 02:00 local "yesterday" read as "today")
+	today := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, time.UTC)
+	diff := today.Sub(t)
 	switch {
 	case diff < 24*time.Hour:
 		return cardStatus{text: "last entry: today\nyou're up to date"}
