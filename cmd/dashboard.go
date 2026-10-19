@@ -1150,6 +1150,8 @@ func (m dashboardModel) gridBody() string {
 
 	if m.showAgenda {
 		b.WriteString(m.renderAgenda())
+	} else if m.allUnconfigured() {
+		b.WriteString(m.renderWelcome())
 	} else {
 		// grid: m.cols() cards per row (1/2/3 by width), centered at gridLeft()
 		cols, left := m.cols(), strings.Repeat(" ", m.gridLeft())
@@ -1181,6 +1183,42 @@ func (m dashboardModel) gridBody() string {
 		if h > 0 {
 			b.WriteString("\n" + m.renderTodayPanels(h, left) + "\n")
 		}
+	}
+	return b.String()
+}
+
+// allUnconfigured reports a fresh setup: every card has loaded and none of the
+// tools answers (not installed, or no database yet). A quiet day is not this:
+// installed tools with nothing due still show their normal cards.
+func (m dashboardModel) allUnconfigured() bool {
+	if len(m.values) == 0 || len(m.values) != len(m.loaded) {
+		return false
+	}
+	for i, v := range m.values {
+		if !m.loaded[i] || !strings.HasPrefix(v.text, "–  not configured") {
+			return false
+		}
+	}
+	return true
+}
+
+// renderWelcome replaces the empty card grid on a fresh install with the first steps.
+func (m dashboardModel) renderWelcome() string {
+	pad := strings.Repeat(" ", max(2, m.gridLeft()))
+	lines := []string{
+		"Welcome to missionctl",
+		"",
+		"No tool is set up yet (none installed, or none has a database). Three steps:",
+		"",
+		"  1  Install the tools you want:   brew install aeon022/tap/taskctl aeon022/tap/habctl",
+		"  2  Add something to one of them:  taskctl add \"My first task\"",
+		"  3  Come back here: this screen fills with cards. T picks a theme, ? shows all keys.",
+		"",
+		"Run `missionctl doctor` to see which tools are installed.",
+	}
+	var b strings.Builder
+	for _, l := range lines {
+		b.WriteString(pad + l + "\n")
 	}
 	return b.String()
 }
