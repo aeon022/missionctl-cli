@@ -297,6 +297,7 @@ func newDashboardModel() dashboardModel {
 	ti.Placeholder = "paste your Bundle key…"
 	ti.CharLimit = 200
 	ti.SetWidth(50)
+	ti.EchoMode = textinput.EchoPassword // a licence key is a secret: never show it on screen
 
 	si := textinput.New()
 	si.Placeholder = "search tasks, events, notes, mail, budget, diary, time, habits…"
