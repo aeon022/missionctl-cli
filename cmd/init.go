@@ -43,7 +43,7 @@ func runInit(_ *cobra.Command, _ []string) error {
 			apiKey = strings.TrimSpace(scanner.Text())
 		}
 		if apiKey != "" {
-			exports = append(exports, fmt.Sprintf("export ANTHROPIC_API_KEY=%s", apiKey))
+			exports = append(exports, "export ANTHROPIC_API_KEY="+shQuote(apiKey))
 		}
 	}
 
@@ -57,7 +57,7 @@ func runInit(_ *cobra.Command, _ []string) error {
 		vaultPath = strings.TrimSpace(scanner.Text())
 	}
 	if vaultPath != "" {
-		exports = append(exports, fmt.Sprintf("export NOTECTL_VAULT_PATH=%s", vaultPath))
+		exports = append(exports, "export NOTECTL_VAULT_PATH="+shQuote(vaultPath))
 	}
 
 	fmt.Fprintln(cliOut)
@@ -105,4 +105,10 @@ func runInit(_ *cobra.Command, _ []string) error {
 	fmt.Fprintln(cliOut)
 
 	return nil
+}
+
+// shQuote single-quotes s for a POSIX shell, so a vault path with spaces (or a key with
+// special characters) survives being pasted into a shell profile.
+func shQuote(s string) string {
+	return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'"
 }

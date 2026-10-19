@@ -1,7 +1,9 @@
 package cmd
 
 import (
+	"bytes"
 	"encoding/json"
+	"encoding/xml"
 	"fmt"
 	"os"
 	"os/exec"
@@ -103,7 +105,7 @@ func saveSeen(path string, seen map[string]time.Time) error {
 		return err
 	}
 	b, _ := json.Marshal(seen)
-	return os.WriteFile(path, b, 0o644)
+	return os.WriteFile(path, b, 0o600) // event titles are private
 }
 
 func gatherNotifyContext(now time.Time) notifyContext {
@@ -152,7 +154,16 @@ func notifyAgentPath() string {
 	return filepath.Join(home, "Library", "LaunchAgents", notifyLabel+".plist")
 }
 
+// xmlText escapes s for use inside a plist <string>: a home folder like /Users/a&b would
+// otherwise produce a file launchd rejects.
+func xmlText(s string) string {
+	var b bytes.Buffer
+	_ = xml.EscapeText(&b, []byte(s))
+	return b.String()
+}
+
 func notifyPlist(self string, interval int, logDir string) string {
+	self, logDir = xmlText(self), xmlText(logDir)
 	return fmt.Sprintf(`<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
