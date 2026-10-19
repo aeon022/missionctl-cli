@@ -5,6 +5,16 @@ taskctl, notectl, budgetctl, habctl, timectl, diaryctl and postctl. Checks
 what's installed, gives a daily briefing across every tool's database, and
 installs/updates the whole suite in one command.
 
+![missionctl demo](docs/demo.gif)
+
+**Install**
+
+```bash
+brew install aeon022/tap/missionctl
+```
+
+Prebuilt binaries for macOS and Linux (arm64, amd64) are on the [Releases](https://github.com/aeon022/missionctl-cli/releases) page. Questions: see [SUPPORT.md](SUPPORT.md).
+
 ---
 
 ## Quick Start
