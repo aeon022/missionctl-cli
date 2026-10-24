@@ -128,6 +128,9 @@ func runStatus(_ *cobra.Command, _ []string) error {
 	printStatus("Timer", "timectl", timerStatus(now))
 	printStatus("Diary", "diaryctl", diaryStatus())
 	printStatus("Budget", "budgetctl", budgetStatus(now))
+	if w := wealthStatus(); w.text != "" {
+		printStatus("Wealth", "budgetctl", w)
+	}
 	printStatus("Habits", "habctl", habitStatus(now))
 	printStatus("Notes", "notectl", noteStatus(now))
 	printStatus("Mail", "mailctl", mailStatus())
