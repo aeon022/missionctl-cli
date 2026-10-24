@@ -43,6 +43,7 @@ missionctl search steuer
 # AI day plan / weekly review (prints only, changes nothing)
 missionctl plan
 missionctl review
+missionctl review --plain          # same week as plain numbers: no AI, no network
 
 # macOS banners: event in 10 min, streak at risk, tasks due
 missionctl notify --dry-run
@@ -60,7 +61,7 @@ missionctl notify --dry-run
 | `missionctl log`     | Activity log: what you did across the suite (`--since`, `--tool`, `--json`) |
 | `missionctl search`  | Search all tools at once (`--per-tool N`, `--json`)                 |
 | `missionctl plan`    | AI day plan from calendar, open tasks, habits (`--lang`, `--show-prompt`) |
-| `missionctl review`  | AI weekly review across time, tasks, habits, budget, diary          |
+| `missionctl review`  | Weekly review across time, tasks, habits, budget, diary — AI, or `--plain` for local numbers |
 | `missionctl notify`  | macOS notifications, once each (`--dry-run`, `--install`, `--uninstall`) |
 | `missionctl init`    | Interactive wizard: API key, Obsidian vault path, install missing tools |
 | `missionctl install` | Build + install every tool via its `setup.sh` (`--all` to reinstall) |
@@ -177,7 +178,14 @@ nothing is written to any tool. `--show-prompt` prints exactly what would be sen
 instead of calling the AI. `--lang German` (or any language) fixes the answer
 language; the default `auto` answers in the language your items are written in.
 
-### `missionctl review [--lang LANG] [--show-prompt]`
+### `missionctl review [--plain|--json] [--days N] [--money] [--lang LANG] [--show-prompt]`
+
+**`--plain`** prints the week as plain numbers, summed up locally — no AI provider, no network: tasks
+done and overdue, time per project, habits (`done/days`, best streak), medication adherence as **one
+aggregate percentage** (never a medication name), and belegctl receipts still to check or match.
+`--json` gives the same data for scripts; `--days N` changes the window (default 7); `--money` adds
+income, spending, top categories and net worth (off by default). Tools that aren't installed are left out.
+Health and investment data are **never** part of the AI variant below.
 
 A weekly review from compact snapshots of timectl (last 7 days), taskctl (this
 week), habctl, budgetctl (summary) and diaryctl (last 7 entries). Each snapshot is

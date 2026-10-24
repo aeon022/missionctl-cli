@@ -134,6 +134,11 @@ func gatherReviewContext(now time.Time) reviewContext {
 		}
 		c.Parts = append(c.Parts, reviewPart{src.title, s})
 	}
+	// Receipt counts only (no suppliers, no amounts). Health and investment data are NEVER sent to an AI provider.
+	if r := gatherReceipts(); r != nil {
+		b, _ := json.Marshal(r)
+		c.Parts = append(c.Parts, reviewPart{"Receipts (counts only)", string(b)})
+	}
 	return c
 }
 
@@ -177,6 +182,8 @@ func streamLLM(ctx context.Context, w io.Writer, system, user string) error {
 
 var planLang, reviewLang string
 var planShowPrompt, reviewShowPrompt bool
+var reviewPlain, reviewJSON, reviewMoney bool
+var reviewDays int
 
 var planCmd = &cobra.Command{
 	Use:   "plan",
@@ -193,8 +200,24 @@ var planCmd = &cobra.Command{
 
 var reviewCmd = &cobra.Command{
 	Use:   "review",
-	Short: "AI weekly review across time, tasks, habits, budget and diary",
+	Short: "Weekly review across time, tasks, habits, budget and diary (AI, or --plain for local numbers only)",
+	Long: `Weekly review across your tools.
+
+By default an AI provider writes it from raw tool data (see --show-prompt for exactly what is sent).
+--plain prints the same tools' numbers summed up locally: no AI, no network. --json implies --plain.
+Health appears only as one aggregate percentage; money only with --money.`,
 	RunE: func(_ *cobra.Command, _ []string) error {
+		if reviewDays < 1 || reviewDays > 366 {
+			return fmt.Errorf("--days must be between 1 and 366")
+		}
+		if reviewPlain || reviewJSON {
+			s := gatherWeek(time.Now(), reviewDays, reviewMoney)
+			if reviewJSON {
+				return renderWeekJSON(cliOut, s)
+			}
+			renderWeek(cliOut, s)
+			return nil
+		}
 		sys, user := buildReviewPrompt(gatherReviewContext(time.Now()), reviewLang)
 		if reviewShowPrompt {
 			fmt.Fprintln(cliOut, sys+"\n\n"+user)
@@ -209,5 +232,9 @@ func init() {
 	planCmd.Flags().BoolVar(&planShowPrompt, "show-prompt", false, "Print the prompt instead of calling the AI (see exactly what would be sent)")
 	reviewCmd.Flags().StringVar(&reviewLang, "lang", "auto", "Answer language (auto = language of your data)")
 	reviewCmd.Flags().BoolVar(&reviewShowPrompt, "show-prompt", false, "Print the prompt instead of calling the AI")
+	reviewCmd.Flags().BoolVar(&reviewPlain, "plain", false, "Local numbers only: no AI, no network")
+	reviewCmd.Flags().BoolVar(&reviewJSON, "json", false, "Same numbers as JSON (implies --plain)")
+	reviewCmd.Flags().BoolVar(&reviewMoney, "money", false, "Include income, spending and net worth (--plain/--json)")
+	reviewCmd.Flags().IntVar(&reviewDays, "days", 7, "Days to cover (--plain/--json)")
 	rootCmd.AddCommand(planCmd, reviewCmd)
 }
