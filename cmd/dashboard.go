@@ -288,8 +288,10 @@ type cardStatus struct {
 }
 
 type dashboardModel struct {
-	scroll      int // first visible body line when the dashboard is taller than the terminal
-	forceH      int // >0: render cards at exactly this height (row alignment)
+	gen         int        // bumped by every message except wheel scrolling: the body cache is valid only within one gen
+	body        *bodyCache // shared across model copies; see gridBody
+	scroll      int        // first visible body line when the dashboard is taller than the terminal
+	forceH      int        // >0: render cards at exactly this height (row alignment)
 	cursor      int
 	err         error
 	width       int
@@ -344,7 +346,7 @@ func newDashboardModel() dashboardModel {
 	si.CharLimit = 120
 	si.SetWidth(60)
 
-	return dashboardModel{values: make([]cardStatus, len(dashboardCards)), loaded: make([]bool, len(dashboardCards)), now: time.Now(), width: 80, settingsInput: ti, searchInput: si, hover: -1, lastClick: -1, loading: true}
+	return dashboardModel{values: make([]cardStatus, len(dashboardCards)), loaded: make([]bool, len(dashboardCards)), now: time.Now(), width: 80, settingsInput: ti, searchInput: si, hover: -1, lastClick: -1, loading: true, body: &bodyCache{}}
 }
 
 // cardsLoadedMsg carries every card's status, fetched in parallel off the UI
@@ -393,7 +395,16 @@ func (m dashboardModel) Init() tea.Cmd {
 	return tea.Batch(tickEvery(time.Second), refreshCmd(), loadAgendaCmd())
 }
 
+// Update invalidates the cached body for every message but wheel scrolling, which only moves m.scroll.
+// A trackpad sends dozens of wheel events a second and rebuilding the whole grid for each made scrolling stutter.
 func (m dashboardModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+	if _, wheel := msg.(tea.MouseWheelMsg); !wheel {
+		m.gen++
+	}
+	return m.update(msg)
+}
+
+func (m dashboardModel) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	if next, cmd, handled := m.settingsMsgUpdate(msg); handled {
 		return next, cmd
 	}
@@ -1183,8 +1194,31 @@ func (m dashboardModel) renderHelpPopup() string {
 // bodyAvail is the number of body lines that fit above the 4 pinned lines (blank, error, status, footer).
 func (m dashboardModel) bodyAvail() int { return m.height - 4 }
 
-// gridBody is header + cards + Today panels (or the agenda), before scrolling.
+type bodyKey struct {
+	gen, width, height, cursor int
+	agenda                     bool
+}
+
+type bodyCache struct {
+	key  bodyKey
+	text string
+	ok   bool
+}
+
+// gridBody is header + cards + Today panels (or the agenda), before scrolling. It is memoized per
+// message generation, so a burst of wheel events renders the grid once.
 func (m dashboardModel) gridBody() string {
+	if m.body == nil {
+		return m.buildGridBody()
+	}
+	k := bodyKey{m.gen, m.width, m.height, m.cursor, m.showAgenda}
+	if !m.body.ok || m.body.key != k {
+		m.body.text, m.body.key, m.body.ok = m.buildGridBody(), k, true
+	}
+	return m.body.text
+}
+
+func (m dashboardModel) buildGridBody() string {
 	var b strings.Builder
 
 	b.WriteString("\n" + m.renderHeader() + "\n\n")

@@ -694,6 +694,7 @@ func TestDashboardShowsWelcomeOnAFreshSetup(t *testing.T) {
 		t.Errorf("expected the welcome steps on a fresh setup:\n%s", out)
 	}
 	m.values[0] = cardStatus{text: "3 open"} // one tool with data brings the grid back
+	m.gen++                                  // direct mutation bypasses Update, which would invalidate the body cache
 	if out := ansi.Strip(m.gridBody()); strings.Contains(out, "Welcome to missionctl") {
 		t.Errorf("the welcome screen must disappear once any tool has data:\n%s", out)
 	}
