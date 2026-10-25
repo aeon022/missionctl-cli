@@ -47,14 +47,15 @@ func TestSettingsScreenMasksTheKeyAndActivates(t *testing.T) {
 	if !handled || m.settingsBusy || m.settingsMsg != "✓ Bundle unlocked on every installed tool." || m.settingsInput.Value() != "" {
 		t.Errorf("after success: busy=%v msg=%q key left=%q", m.settingsBusy, m.settingsMsg, m.settingsInput.Value())
 	}
-	if len(calls()) != 5 || !strings.Contains(calls()[0], "<activate> <KEY-123>") {
-		t.Errorf("calls = %v", calls())
+	got := strings.Join(calls(), "\n")
+	if strings.Count(got, "stdin=<KEY-123>") != 5 || strings.Contains(got, "<activate> <KEY-123>") {
+		t.Errorf("the key goes to each tool on stdin only, calls = %v", calls())
 	}
 }
 
 func TestSettingsScreenReportsFailuresAndClearsTheKey(t *testing.T) {
 	stubs := bundleStubs()
-	stubs["notectl"] = []fakeRule{{args: "license activate BAD", code: 1}}
+	stubs["notectl"] = []fakeRule{{args: "license activate --help", out: "standard input"}, {args: "license activate -", code: 1}}
 	fakeSuite(t, stubs)
 	m := newDashboardModel()
 	m.settingsInput.SetValue("BAD")

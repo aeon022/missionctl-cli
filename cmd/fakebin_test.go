@@ -27,6 +27,7 @@ func fakeSuite(t *testing.T, tools map[string][]fakeRule) (calls func() []string
 		b.WriteString("#!/bin/sh\n")
 		b.WriteString("printf '%s' '" + name + "' >> '" + logPath + "'\n")
 		b.WriteString("for a in \"$@\"; do printf ' <%s>' \"$a\" >> '" + logPath + "'; done\n")
+		b.WriteString("if [ ! -t 0 ]; then IFS= read -r line; [ -n \"$line\" ] && printf ' stdin=<%s>' \"$line\" >> '" + logPath + "'; fi\n")
 		b.WriteString("printf '\\n' >> '" + logPath + "'\n")
 		b.WriteString("case \"$*\" in\n")
 		for _, r := range rules {

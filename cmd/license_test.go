@@ -6,7 +6,7 @@ import (
 )
 
 func bundleStubs() map[string][]fakeRule {
-	ok := []fakeRule{{args: "license activate KEY-123", out: "✓ License activated!"}}
+	ok := []fakeRule{{args: "license activate --help", out: "send the key on standard input"}, {args: "license activate -", out: "✓ License activated!"}}
 	return map[string][]fakeRule{"calctl": ok, "budgetctl": ok, "notectl": ok, "habctl": ok, "mailctl": ok, "postctl": ok}
 }
 
@@ -19,7 +19,7 @@ func TestActivateAllTouchesOnlyBundleToolsAndPassesTheKey(t *testing.T) {
 	}
 	got := strings.Join(calls(), "\n")
 	for _, tool := range []string{"calctl", "budgetctl", "notectl", "habctl", "mailctl"} {
-		if !strings.Contains(got, tool+" <license> <activate> <KEY-123>") {
+		if !strings.Contains(got, tool+" <license> <activate> <-> stdin=<KEY-123>") {
 			t.Errorf("%s was not called with the key:\n%s", tool, got)
 		}
 	}
@@ -31,7 +31,7 @@ func TestActivateAllTouchesOnlyBundleToolsAndPassesTheKey(t *testing.T) {
 
 func TestActivateAllReportsFailuresAndMissingTools(t *testing.T) {
 	stubs := bundleStubs()
-	stubs["budgetctl"] = []fakeRule{{args: "license activate KEY-123", out: "checking…\n✗ Activation failed: invalid key", code: 1}}
+	stubs["budgetctl"] = []fakeRule{{args: "license activate --help", out: "standard input"}, {args: "license activate -", out: "checking…\n✗ Activation failed: invalid key", code: 1}}
 	delete(stubs, "habctl") // not installed
 	fakeSuite(t, stubs)
 	byTool := map[string]toolResult{}
@@ -62,13 +62,19 @@ func TestRunLicenseActivateOutcomes(t *testing.T) {
 		if strings.Contains(out.String(), "KEY-123") {
 			t.Errorf("the key must not be echoed:\n%s", out.String())
 		}
-		if len(calls()) != 5 {
-			t.Errorf("expected 5 tool calls, got %v", calls())
+		n := 0
+		for _, c := range calls() {
+			if !strings.Contains(c, "<--help>") {
+				n++
+			}
+		}
+		if n != 5 || strings.Contains(strings.Join(calls(), "\n"), "<activate> <KEY-123>") {
+			t.Errorf("expected 5 activations with the key on stdin only, got %v", calls())
 		}
 	})
 	t.Run("a failing tool turns into an error", func(t *testing.T) {
 		stubs := bundleStubs()
-		stubs["mailctl"] = []fakeRule{{args: "license activate KEY-123", code: 1}}
+		stubs["mailctl"] = []fakeRule{{args: "license activate --help", out: "standard input"}, {args: "license activate -", code: 1}}
 		fakeSuite(t, stubs)
 		out := captureOut(t)
 		err := runLicenseActivate(nil, []string{"KEY-123"})
@@ -143,6 +149,37 @@ func TestResultLinePicksTheInformativeLine(t *testing.T) {
 	} {
 		if got := resultLine(tc.out, tc.prefix); got != tc.want {
 			t.Errorf("resultLine(%q,%q) = %q, want %q", tc.out, tc.prefix, got, tc.want)
+		}
+	}
+}
+
+func TestActivateOneKeepsOldToolsOnTheArgumentPath(t *testing.T) {
+	// a tool binary that predates stdin support would take "-" as the key and save it as invalid
+	calls := fakeSuite(t, map[string][]fakeRule{"calctl": {{args: "license activate KEY-123", out: "ok"}}})
+	if _, err := activateOne("calctl", "KEY-123"); err != nil {
+		t.Fatal(err)
+	}
+	if got := strings.Join(calls(), "\n"); strings.Contains(got, "<->") || !strings.Contains(got, "<KEY-123>") {
+		t.Errorf("old tool must get the argument:\n%s", got)
+	}
+}
+
+func TestLicenseKeyArg(t *testing.T) {
+	for _, tc := range []struct {
+		args  []string
+		stdin string
+		want  string
+		fail  bool
+	}{
+		{[]string{" K1 "}, "", "K1", false},
+		{[]string{"-"}, "K2\n", "K2", false},
+		{nil, "  K3  \n", "K3", false},
+		{nil, "", "", true},
+		{[]string{"-"}, "\n", "", true},
+	} {
+		got, err := licenseKeyArg(tc.args, strings.NewReader(tc.stdin))
+		if (err != nil) != tc.fail || got != tc.want {
+			t.Errorf("%v %q: got %q, %v", tc.args, tc.stdin, got, err)
 		}
 	}
 }

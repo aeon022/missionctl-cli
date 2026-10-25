@@ -1,7 +1,11 @@
 package cmd
 
 import (
+	"bufio"
+	"errors"
 	"fmt"
+	"io"
+	"os"
 	"os/exec"
 	"strings"
 
@@ -38,9 +42,10 @@ it.`,
 }
 
 var licenseActivateCmd = &cobra.Command{
-	Use:   "activate <key>",
+	Use:   "activate [key|-]",
 	Short: "Activate your Bundle license key on every installed tool",
-	Args:  cobra.ExactArgs(1),
+	Long:  "Pass the key as the argument, or send it on standard input (no argument, or \"-\") to keep it out of the process list: echo KEY | missionctl license activate",
+	Args:  cobra.MaximumNArgs(1),
 	RunE:  runLicenseActivate,
 }
 
@@ -57,7 +62,10 @@ func init() {
 }
 
 func runLicenseActivate(cmd *cobra.Command, args []string) error {
-	key := strings.TrimSpace(args[0])
+	key, err := licenseKeyArg(args, os.Stdin)
+	if err != nil {
+		return err
+	}
 
 	detailStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("8"))
 
@@ -120,7 +128,7 @@ func activateAll(key string) []toolResult {
 			results = append(results, toolResult{tool: name})
 			continue
 		}
-		out, err := exec.Command(name, "license", "activate", key).CombinedOutput()
+		out, err := activateOne(name, key)
 		if err != nil {
 			results = append(results, toolResult{tool: name, installed: true, detail: resultLine(string(out), "✗")})
 			continue
@@ -169,4 +177,32 @@ func resultLine(out, prefix string) string {
 		}
 	}
 	return lastNonEmpty
+}
+
+// licenseKeyArg takes the key from the argument, or from standard input when the argument is "-" or missing.
+func licenseKeyArg(args []string, stdin io.Reader) (string, error) {
+	if len(args) == 1 && args[0] != "-" {
+		return strings.TrimSpace(args[0]), nil
+	}
+	line, err := bufio.NewReader(stdin).ReadString('\n')
+	if key := strings.TrimSpace(line); key != "" {
+		return key, nil
+	}
+	if err != nil {
+		return "", fmt.Errorf("no key on standard input: %w", err)
+	}
+	return "", errors.New("no key on standard input")
+}
+
+// activateOne hands the key to one tool. Tools that can read it from standard input get it there, which
+// keeps it out of the process list; an older tool binary would take "-" as the key itself and save it
+// as invalid, so those still get the key as an argument until they are rebuilt.
+func activateOne(tool, key string) ([]byte, error) {
+	help, _ := exec.Command(tool, "license", "activate", "--help").CombinedOutput()
+	if !strings.Contains(string(help), "standard input") {
+		return exec.Command(tool, "license", "activate", key).CombinedOutput()
+	}
+	c := exec.Command(tool, "license", "activate", "-")
+	c.Stdin = strings.NewReader(key + "\n")
+	return c.CombinedOutput()
 }
