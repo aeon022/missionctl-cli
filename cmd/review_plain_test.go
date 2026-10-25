@@ -25,6 +25,7 @@ func reviewSuite(t *testing.T) {
 		"habctl":     {{args: "stats --json --days 7", out: `{"data":[{"name":"Sport","streak":5,"days_done":6,"days_total":7},{"name":"Lesen","streak":2,"days_done":4,"days_total":7}]}`}},
 		"healthctl":  {{args: "adherence --json --days 7", out: `{"pct":92.5,"judged":14,"missed":1,"has_data":true}`}},
 		"receiptctl": {{args: "list --json", out: `{"data":[{"status":"ok","reviewed":true,"txn_ref":"x"},{"status":"unclear","reviewed":false,"txn_ref":""},{"status":"ok","reviewed":false,"txn_ref":""}]}`}},
+		"invoicectl": {{args: "list --json", out: `[{"state":"overdue","open_cents":50000,"currency":"EUR","customer_name":"Geheim GmbH"},{"state":"open","open_cents":12000,"currency":"EUR"},{"state":"draft","open_cents":0,"currency":"EUR"},{"state":"paid","open_cents":0,"currency":"EUR"}]`}},
 		"budgetctl": {
 			{args: "list --json -n 100000", out: `[{"Date":"2026-10-22T00:00:00Z","Amount":-120,"Category":"food"},{"Date":"2026-10-23T00:00:00Z","Amount":-30,"Category":"food"},{"Date":"2026-10-20T00:00:00Z","Amount":-50,"Category":""},{"Date":"2026-10-21T00:00:00Z","Amount":1000,"Category":"salary"},{"Date":"2026-01-01T00:00:00Z","Amount":-9999,"Category":"old"}]`},
 			{args: "balance --json", out: `{"data":[{"account":"giro","anchored":true,"balance":2000}]}`},
@@ -117,5 +118,31 @@ func TestReviewFormatting(t *testing.T) {
 	}
 	if plural(1, "day", "days") != "1 day" || plural(7, "day", "days") != "7 days" || plural(0, "day", "days") != "0 days" {
 		t.Error("plural")
+	}
+}
+
+func TestReviewShowsInvoiceCountsAndKeepsCustomersFromAI(t *testing.T) {
+	reviewSuite(t)
+	var b bytes.Buffer
+	renderWeek(&b, gatherWeek(reviewNow, 7, false))
+	if got := b.String(); !strings.Contains(got, "2 open · 1 overdue · 1 draft") {
+		t.Errorf("invoice line without money:\n%s", got)
+	}
+	b.Reset()
+	renderWeek(&b, gatherWeek(reviewNow, 7, true))
+	if got := b.String(); !strings.Contains(got, "2 open (€620) · 1 overdue (€500) · 1 draft") {
+		t.Errorf("invoice line with --money:\n%s", got)
+	}
+	var found bool
+	for _, p := range gatherReviewContext(reviewNow).Parts {
+		if strings.HasPrefix(p.Title, "Invoices") {
+			found = true
+			if !strings.Contains(p.JSON, `"overdue":1`) || strings.Contains(p.JSON, "Geheim") || strings.Contains(p.JSON, "500") {
+				t.Errorf("AI part must be counts only: %s", p.JSON)
+			}
+		}
+	}
+	if !found {
+		t.Error("no invoice part in the AI context")
 	}
 }

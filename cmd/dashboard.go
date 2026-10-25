@@ -51,6 +51,7 @@ var allDashboardCards = []dashboardCard{
 	{"9", "💊", "Health", "healthctl", lipgloss.Color("9"), healthStatus, nil},
 	{"0", "📈", "Invest", "investctl", lipgloss.Color("2"), investStatus, nil},
 	{"i", "📄", "Invoices", "invoicectl", lipgloss.Color("6"), invoiceStatus, nil},
+	{"w", "🏦", "Wealth", "budgetctl", lipgloss.Color("10"), wealthCard, nil},
 	{"e", "🧾", "Receipts", "receiptctl", lipgloss.Color("5"), receiptStatus, nil},
 	{"p", "📣", "Postctl", "postctl", lipgloss.Color("13"), postctlStatus, nil},
 }
@@ -134,6 +135,14 @@ func invoiceStatus(_ time.Time) cardStatus {
 		return cardStatus{text: text + fmt.Sprintf("\n%d overdue", overdue), urgency: urgencyWarn}
 	}
 	return cardStatus{text: text}
+}
+
+// wealthCard is the Wealth row of `missionctl status` as a card; jumping in opens budgetctl.
+func wealthCard(_ time.Time) cardStatus {
+	if w := wealthStatus(); w.text != "" {
+		return w
+	}
+	return cardStatus{text: "no balances yet\nbudgetctl balance set"}
 }
 
 // receiptStatus shows counts only — never suppliers or amounts on a shared screen.
@@ -1206,7 +1215,7 @@ func (m dashboardModel) renderHelpPopup() string {
 		Section("Navigate").
 		Row("↑↓←→ / hjkl", "move between cards").
 		Row("PgUp / PgDn / wheel", "scroll when the terminal is small").
-		Row("1-9, 0, i, e, p", "open that tool (0 = investctl, i = invoicectl, e = receiptctl, p = postctl)").
+		Row("1-9, 0, i, e, w, p", "open that tool (0 = investctl, i = invoicectl, e = receiptctl, w = budgetctl balances, p = postctl)").
 		Row("enter", "open the selected tool").
 		Row("d / space", "peek: list the card's items without leaving").
 		Row("click / double-click", "select / open a card; click Today for the agenda").

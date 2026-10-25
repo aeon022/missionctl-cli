@@ -24,6 +24,7 @@ type weekSummary struct {
 	Health   *healthWeek      `json:"health,omitempty"`
 	Money    *moneyWeek       `json:"money,omitempty"`
 	Receipts *receiptOverview `json:"receipts,omitempty"`
+	Invoices *invoiceOverview `json:"invoices,omitempty"`
 }
 
 type taskWeek struct {
@@ -79,6 +80,14 @@ type receiptOverview struct {
 	Unmatched int `json:"unmatched"`
 }
 
+type invoiceOverview struct {
+	Open         int   `json:"open"`
+	Overdue      int   `json:"overdue"`
+	Drafts       int   `json:"drafts"`
+	OpenCents    int64 `json:"open_cents"`    // EUR only; other currencies are counted, not summed
+	OverdueCents int64 `json:"overdue_cents"` // EUR only
+}
+
 func onPath(bin string) bool { _, err := exec.LookPath(bin); return err == nil }
 
 func gatherWeek(now time.Time, days int, money bool) weekSummary {
@@ -90,6 +99,10 @@ func gatherWeek(now time.Time, days int, money bool) weekSummary {
 	w.Habits = gatherHabits(days)
 	w.Health = gatherHealth(days)
 	w.Receipts = gatherReceipts()
+	w.Invoices = gatherInvoices()
+	if w.Invoices != nil && !money { // amounts only when asked for, like the rest of the money data
+		w.Invoices.OpenCents, w.Invoices.OverdueCents = 0, 0
+	}
 	if money {
 		w.Money = gatherMoney(from)
 	}
@@ -236,6 +249,42 @@ func gatherReceipts() *receiptOverview {
 	return o
 }
 
+func gatherInvoices() *invoiceOverview {
+	if !onPath("invoicectl") {
+		return nil
+	}
+	var rows []struct {
+		State     string `json:"state"`
+		OpenCents int64  `json:"open_cents"`
+		Currency  string `json:"currency"`
+	}
+	if !runToolJSON("invoicectl", []string{"list", "--json"}, &rows) {
+		return nil
+	}
+	o := &invoiceOverview{}
+	for _, r := range rows {
+		if r.State == "draft" {
+			o.Drafts++
+		}
+		if r.OpenCents > 0 {
+			o.Open++
+			if r.Currency == "EUR" {
+				o.OpenCents += r.OpenCents
+			}
+		}
+		if r.State == "overdue" {
+			o.Overdue++
+			if r.Currency == "EUR" {
+				o.OverdueCents += r.OpenCents
+			}
+		}
+	}
+	if o.Open == 0 && o.Drafts == 0 {
+		return nil
+	}
+	return o
+}
+
 func gatherMoney(from time.Time) *moneyWeek {
 	if !onPath("budgetctl") {
 		return nil
@@ -373,6 +422,23 @@ func renderWeek(w io.Writer, s weekSummary) {
 	if r := s.Receipts; r != nil {
 		any = true
 		row("Receipts", fmt.Sprintf("%d to check · %d not matched to a booking (of %d)", r.Unchecked, r.Unmatched, r.Total))
+	}
+	if i := s.Invoices; i != nil {
+		any = true
+		line := fmt.Sprintf("%d open", i.Open)
+		if i.OpenCents > 0 {
+			line += " (" + euro(float64(i.OpenCents)/100) + ")"
+		}
+		if i.Overdue > 0 {
+			line += fmt.Sprintf(" · %d overdue", i.Overdue)
+			if i.OverdueCents > 0 {
+				line += " (" + euro(float64(i.OverdueCents)/100) + ")"
+			}
+		}
+		if i.Drafts > 0 {
+			line += " · " + plural(i.Drafts, "draft", "drafts")
+		}
+		row("Invoices", line)
 	}
 	if !any {
 		fmt.Fprintln(w, "  no tool data available")

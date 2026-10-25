@@ -139,6 +139,15 @@ func gatherReviewContext(now time.Time) reviewContext {
 		b, _ := json.Marshal(r)
 		c.Parts = append(c.Parts, reviewPart{"Receipts (counts only)", string(b)})
 	}
+	// Invoice counts only — no customers, no amounts.
+	if i := gatherInvoices(); i != nil {
+		b, _ := json.Marshal(struct {
+			Open    int `json:"open"`
+			Overdue int `json:"overdue"`
+			Drafts  int `json:"drafts"`
+		}{i.Open, i.Overdue, i.Drafts})
+		c.Parts = append(c.Parts, reviewPart{"Invoices (counts only)", string(b)})
+	}
 	return c
 }
 
