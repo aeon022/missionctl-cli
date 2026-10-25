@@ -50,11 +50,12 @@ var allDashboardCards = []dashboardCard{
 	{"8", "✉", "Mail", "mailctl", lipgloss.Color("4"), func(_ time.Time) cardStatus { return mailStatus() }, nil},
 	{"9", "💊", "Health", "healthctl", lipgloss.Color("9"), healthStatus, nil},
 	{"0", "📈", "Invest", "investctl", lipgloss.Color("2"), investStatus, nil},
-	{"i", "🧾", "Invoices", "invoicectl", lipgloss.Color("6"), invoiceStatus, nil},
+	{"i", "📄", "Invoices", "invoicectl", lipgloss.Color("6"), invoiceStatus, nil},
+	{"e", "🧾", "Receipts", "receiptctl", lipgloss.Color("5"), receiptStatus, nil},
 	{"p", "📣", "Postctl", "postctl", lipgloss.Color("13"), postctlStatus, nil},
 }
 
-var dashboardCards = hideUninstalled(filterCards(allDashboardCards, loadCardIDs()), "healthctl", "investctl", "invoicectl", "postctl")
+var dashboardCards = hideUninstalled(filterCards(allDashboardCards, loadCardIDs()), "healthctl", "investctl", "invoicectl", "receiptctl", "postctl")
 
 // hideUninstalled drops the named tools' cards when their binary is missing —
 // these two are private-data tools most setups won't have.
@@ -131,6 +132,40 @@ func invoiceStatus(_ time.Time) cardStatus {
 	}
 	if overdue > 0 {
 		return cardStatus{text: text + fmt.Sprintf("\n%d overdue", overdue), urgency: urgencyWarn}
+	}
+	return cardStatus{text: text}
+}
+
+// receiptStatus shows counts only — never suppliers or amounts on a shared screen.
+func receiptStatus(_ time.Time) cardStatus {
+	var r struct {
+		Data []struct {
+			Status   string `json:"status"`
+			Reviewed bool   `json:"reviewed"`
+			TxnRef   string `json:"txn_ref"`
+		} `json:"data"`
+	}
+	if !runToolJSON("receiptctl", []string{"list", "--json"}, &r) {
+		return cardStatus{text: "–  not configured"}
+	}
+	if len(r.Data) == 0 {
+		return cardStatus{text: "no receipts yet"}
+	}
+	var unclear, unchecked, unmatched int
+	for _, x := range r.Data {
+		if x.Status != "ok" && !x.Reviewed {
+			unclear++
+		}
+		if !x.Reviewed {
+			unchecked++
+		}
+		if x.TxnRef == "" {
+			unmatched++
+		}
+	}
+	text := fmt.Sprintf("%d receipts\n%d unchecked · %d without booking", len(r.Data), unchecked, unmatched)
+	if unclear > 0 {
+		return cardStatus{text: text + fmt.Sprintf("\n%d need a look", unclear), urgency: urgencyWarn}
 	}
 	return cardStatus{text: text}
 }
@@ -1171,7 +1206,7 @@ func (m dashboardModel) renderHelpPopup() string {
 		Section("Navigate").
 		Row("↑↓←→ / hjkl", "move between cards").
 		Row("PgUp / PgDn / wheel", "scroll when the terminal is small").
-		Row("1-9, 0, i, p", "open that tool (0 = investctl, i = invoicectl, p = postctl)").
+		Row("1-9, 0, i, e, p", "open that tool (0 = investctl, i = invoicectl, e = receiptctl, p = postctl)").
 		Row("enter", "open the selected tool").
 		Row("d / space", "peek: list the card's items without leaving").
 		Row("click / double-click", "select / open a card; click Today for the agenda").
