@@ -50,10 +50,11 @@ var allDashboardCards = []dashboardCard{
 	{"8", "✉", "Mail", "mailctl", lipgloss.Color("4"), func(_ time.Time) cardStatus { return mailStatus() }, nil},
 	{"9", "💊", "Health", "healthctl", lipgloss.Color("9"), healthStatus, nil},
 	{"0", "📈", "Invest", "investctl", lipgloss.Color("2"), investStatus, nil},
+	{"i", "🧾", "Invoices", "invoicectl", lipgloss.Color("6"), invoiceStatus, nil},
 	{"p", "📣", "Postctl", "postctl", lipgloss.Color("13"), postctlStatus, nil},
 }
 
-var dashboardCards = hideUninstalled(filterCards(allDashboardCards, loadCardIDs()), "healthctl", "investctl", "postctl")
+var dashboardCards = hideUninstalled(filterCards(allDashboardCards, loadCardIDs()), "healthctl", "investctl", "invoicectl", "postctl")
 
 // hideUninstalled drops the named tools' cards when their binary is missing —
 // these two are private-data tools most setups won't have.
@@ -93,6 +94,45 @@ func healthStatus(_ time.Time) cardStatus {
 		return cardStatus{text: text + "\nnext " + r.Next}
 	}
 	return cardStatus{text: text + "\nall done"}
+}
+
+// invoiceStatus shows counts and the open sum only — never customers or single amounts on a shared screen.
+func invoiceStatus(_ time.Time) cardStatus {
+	var rows []struct {
+		State     string `json:"state"`
+		OpenCents int64  `json:"open_cents"`
+		Currency  string `json:"currency"`
+	}
+	if !runToolJSON("invoicectl", []string{"list", "--json"}, &rows) {
+		return cardStatus{text: "–  not configured"}
+	}
+	var open, overdue, drafts int
+	var sum int64
+	for _, r := range rows {
+		switch r.State {
+		case "draft":
+			drafts++
+		case "overdue":
+			overdue++
+		}
+		if r.OpenCents > 0 {
+			open++
+			if r.Currency == "EUR" {
+				sum += r.OpenCents
+			}
+		}
+	}
+	if open == 0 && drafts == 0 {
+		return cardStatus{text: "nothing open"}
+	}
+	text := fmt.Sprintf("%d open · %.0f EUR", open, float64(sum)/100)
+	if drafts > 0 {
+		text += fmt.Sprintf("\n%d draft(s)", drafts)
+	}
+	if overdue > 0 {
+		return cardStatus{text: text + fmt.Sprintf("\n%d overdue", overdue), urgency: urgencyWarn}
+	}
+	return cardStatus{text: text}
 }
 
 func investStatus(_ time.Time) cardStatus {
@@ -1120,7 +1160,7 @@ func (m dashboardModel) renderHelpPopup() string {
 		Section("Navigate").
 		Row("↑↓←→ / hjkl", "move between cards").
 		Row("PgUp / PgDn / wheel", "scroll when the terminal is small").
-		Row("1-9, 0, p", "open that tool (0 = investctl, p = postctl)").
+		Row("1-9, 0, i, p", "open that tool (0 = investctl, i = invoicectl, p = postctl)").
 		Row("enter", "open the selected tool").
 		Row("d / space", "peek: list the card's items without leaving").
 		Row("click / double-click", "select / open a card; click Today for the agenda").

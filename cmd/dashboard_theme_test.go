@@ -34,7 +34,7 @@ func TestDashboardThemeKeyOpensPickerWithLivePreview(t *testing.T) {
 }
 
 func TestTenthAndPostctlCardsGetJumpKeys(t *testing.T) {
-	cards := filterCards(allDashboardCards, nil) // all 11 cards
+	cards := filterCards(allDashboardCards, nil) // all 12 cards
 	if cards[9].key != "0" {
 		t.Errorf("10th card key = %q, want 0", cards[9].key)
 	}
