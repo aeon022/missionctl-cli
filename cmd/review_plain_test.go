@@ -14,7 +14,7 @@ func reviewSuite(t *testing.T) {
 	fakeSuite(t, map[string][]fakeRule{
 		"taskctl": {{args: "list --all --json", out: `{"data":[
 			{"title":"Old done","status":"completed","completed_at":"2026-09-01T10:00:00Z"},
-			{"title":"Ship belegctl","status":"completed","completed_at":"2026-10-23T10:00:00Z"},
+			{"title":"Ship receiptctl","status":"completed","completed_at":"2026-10-23T10:00:00Z"},
 			{"title":"Write review","status":"completed","completed_at":"2026-10-22T10:00:00Z"},
 			{"title":"Overdue","status":"needsAction","due_date":"2026-10-20T00:00:00Z"},
 			{"title":"Future","status":"needsAction","due_date":"2026-11-20T00:00:00Z"}]}`}},
@@ -24,7 +24,7 @@ func reviewSuite(t *testing.T) {
 			{"task":"c","project":"","duration_seconds":600}],"total_seconds":9600}`}},
 		"habctl":    {{args: "stats --json --days 7", out: `{"data":[{"name":"Sport","streak":5,"days_done":6,"days_total":7},{"name":"Lesen","streak":2,"days_done":4,"days_total":7}]}`}},
 		"healthctl": {{args: "adherence --json --days 7", out: `{"pct":92.5,"judged":14,"missed":1,"has_data":true}`}},
-		"belegctl":  {{args: "list --json", out: `{"data":[{"status":"ok","reviewed":true,"txn_ref":"x"},{"status":"unclear","reviewed":false,"txn_ref":""},{"status":"ok","reviewed":false,"txn_ref":""}]}`}},
+		"receiptctl":  {{args: "list --json", out: `{"data":[{"status":"ok","reviewed":true,"txn_ref":"x"},{"status":"unclear","reviewed":false,"txn_ref":""},{"status":"ok","reviewed":false,"txn_ref":""}]}`}},
 		"budgetctl": {
 			{args: "list --json -n 100000", out: `[{"Date":"2026-10-22T00:00:00Z","Amount":-120,"Category":"food"},{"Date":"2026-10-23T00:00:00Z","Amount":-30,"Category":"food"},{"Date":"2026-10-20T00:00:00Z","Amount":-50,"Category":""},{"Date":"2026-10-21T00:00:00Z","Amount":1000,"Category":"salary"},{"Date":"2026-01-01T00:00:00Z","Amount":-9999,"Category":"old"}]`},
 			{args: "balance --json", out: `{"data":[{"account":"giro","anchored":true,"balance":2000}]}`},
@@ -39,7 +39,7 @@ func TestPlainReviewSumsEverythingLocally(t *testing.T) {
 	got := b.String()
 	for _, want := range []string{
 		"last 7 days (2026-10-18 – 2026-10-24)",
-		"2 done · 1 overdue", "Ship belegctl, Write review",
+		"2 done · 1 overdue", "Ship receiptctl, Write review",
 		"2h 40m", "Alpha 2h 30m · c 10m",
 		"Sport 6/7 · Lesen 4/7", "best streak 5 days",
 		"92% of doses taken (1 missed)",

@@ -208,7 +208,7 @@ func gatherHealth(days int) *healthWeek {
 }
 
 func gatherReceipts() *receiptOverview {
-	if !onPath("belegctl") {
+	if !onPath("receiptctl") {
 		return nil
 	}
 	var r struct {
@@ -218,7 +218,7 @@ func gatherReceipts() *receiptOverview {
 			TxnRef   string `json:"txn_ref"`
 		} `json:"data"`
 	}
-	if !runToolJSON("belegctl", []string{"list", "--json"}, &r) || len(r.Data) == 0 {
+	if !runToolJSON("receiptctl", []string{"list", "--json"}, &r) || len(r.Data) == 0 {
 		return nil
 	}
 	o := &receiptOverview{Total: len(r.Data)}

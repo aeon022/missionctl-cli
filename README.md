@@ -182,7 +182,7 @@ language; the default `auto` answers in the language your items are written in.
 
 **`--plain`** prints the week as plain numbers, summed up locally — no AI provider, no network: tasks
 done and overdue, time per project, habits (`done/days`, best streak), medication adherence as **one
-aggregate percentage** (never a medication name), and belegctl receipts still to check or match.
+aggregate percentage** (never a medication name), and receiptctl receipts still to check or match.
 `--json` gives the same data for scripts; `--days N` changes the window (default 7); `--money` adds
 income, spending, top categories and net worth (off by default). Tools that aren't installed are left out.
 Health and investment data are **never** part of the AI variant below.
