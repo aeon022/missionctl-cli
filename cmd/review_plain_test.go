@@ -25,6 +25,7 @@ func reviewSuite(t *testing.T) {
 		"habctl":     {{args: "stats --json --days 7", out: `{"data":[{"name":"Sport","streak":5,"days_done":6,"days_total":7},{"name":"Lesen","streak":2,"days_done":4,"days_total":7}]}`}},
 		"healthctl":  {{args: "adherence --json --days 7", out: `{"pct":92.5,"judged":14,"missed":1,"has_data":true}`}},
 		"receiptctl": {{args: "list --json", out: `{"data":[{"status":"ok","reviewed":true,"txn_ref":"x"},{"status":"unclear","reviewed":false,"txn_ref":""},{"status":"ok","reviewed":false,"txn_ref":""}]}`}},
+		"rolodexctl": {{args: "due --json", out: `{"count":2,"data":[{"name":"Geheim Person"}]}`}, {args: "list --json --rhythm", out: `[{"name":"Geheim Person"},{"name":"B"},{"name":"C"}]`}},
 		"invoicectl": {{args: "list --json", out: `[{"state":"overdue","open_cents":50000,"currency":"EUR","customer_name":"Geheim GmbH"},{"state":"open","open_cents":12000,"currency":"EUR"},{"state":"draft","open_cents":0,"currency":"EUR"},{"state":"paid","open_cents":0,"currency":"EUR"}]`}},
 		"budgetctl": {
 			{args: "list --json -n 100000", out: `[{"Date":"2026-10-22T00:00:00Z","Amount":-120,"Category":"food"},{"Date":"2026-10-23T00:00:00Z","Amount":-30,"Category":"food"},{"Date":"2026-10-20T00:00:00Z","Amount":-50,"Category":""},{"Date":"2026-10-21T00:00:00Z","Amount":1000,"Category":"salary"},{"Date":"2026-01-01T00:00:00Z","Amount":-9999,"Category":"old"}]`},
@@ -144,5 +145,14 @@ func TestReviewShowsInvoiceCountsAndKeepsCustomersFromAI(t *testing.T) {
 	}
 	if !found {
 		t.Error("no invoice part in the AI context")
+	}
+}
+
+func TestReviewShowsPeopleCountsOnly(t *testing.T) {
+	reviewSuite(t)
+	var b bytes.Buffer
+	renderWeek(&b, gatherWeek(reviewNow, 7, false))
+	if got := b.String(); !strings.Contains(got, "2 overdue for a contact (of 3 with a rhythm)") || strings.Contains(got, "Geheim") {
+		t.Errorf("people line:\n%s", got)
 	}
 }

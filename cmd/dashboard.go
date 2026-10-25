@@ -53,10 +53,11 @@ var allDashboardCards = []dashboardCard{
 	{"i", "📄", "Invoices", "invoicectl", lipgloss.Color("6"), invoiceStatus, nil},
 	{"w", "🏦", "Wealth", "budgetctl", lipgloss.Color("10"), wealthCard, nil},
 	{"e", "🧾", "Receipts", "receiptctl", lipgloss.Color("5"), receiptStatus, nil},
+	{"c", "👥", "People", "rolodexctl", lipgloss.Color("13"), peopleStatus, nil},
 	{"p", "📣", "Postctl", "postctl", lipgloss.Color("13"), postctlStatus, nil},
 }
 
-var dashboardCards = hideUninstalled(filterCards(allDashboardCards, loadCardIDs()), "healthctl", "investctl", "invoicectl", "receiptctl", "postctl")
+var dashboardCards = hideUninstalled(filterCards(allDashboardCards, loadCardIDs()), "healthctl", "investctl", "invoicectl", "receiptctl", "rolodexctl", "postctl")
 
 // hideUninstalled drops the named tools' cards when their binary is missing —
 // these two are private-data tools most setups won't have.
@@ -143,6 +144,30 @@ func wealthCard(_ time.Time) cardStatus {
 		return w
 	}
 	return cardStatus{text: "no balances yet\nbudgetctl balance set"}
+}
+
+// peopleStatus shows counts only — never names on a shared screen.
+func peopleStatus(_ time.Time) cardStatus {
+	var r struct {
+		Count int `json:"count"`
+	}
+	if !runToolJSON("rolodexctl", []string{"due", "--json"}, &r) {
+		return cardStatus{text: "–  not configured"}
+	}
+	var all []struct {
+		Cadence int `json:"cadence_days"`
+	}
+	withRhythm := 0
+	if runToolJSON("rolodexctl", []string{"list", "--json", "--rhythm"}, &all) {
+		withRhythm = len(all)
+	}
+	switch {
+	case withRhythm == 0:
+		return cardStatus{text: "no rhythms set\nrolodexctl rhythm NAME DAYS"}
+	case r.Count == 0:
+		return cardStatus{text: fmt.Sprintf("all caught up\n%d people with a rhythm", withRhythm)}
+	}
+	return cardStatus{text: fmt.Sprintf("%d overdue\n%d people with a rhythm", r.Count, withRhythm), urgency: urgencyWarn}
 }
 
 // receiptStatus shows counts only — never suppliers or amounts on a shared screen.
@@ -1215,7 +1240,7 @@ func (m dashboardModel) renderHelpPopup() string {
 		Section("Navigate").
 		Row("↑↓←→ / hjkl", "move between cards").
 		Row("PgUp / PgDn / wheel", "scroll when the terminal is small").
-		Row("1-9, 0, i, e, w, p", "open that tool (0 = investctl, i = invoicectl, e = receiptctl, w = budgetctl balances, p = postctl)").
+		Row("1-9, 0, i, e, w, c, p", "open that tool (0 = investctl, i = invoicectl, e = receiptctl, w = budgetctl balances, c = rolodexctl, p = postctl)").
 		Row("enter", "open the selected tool").
 		Row("d / space", "peek: list the card's items without leaving").
 		Row("click / double-click", "select / open a card; click Today for the agenda").

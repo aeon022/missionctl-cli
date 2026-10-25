@@ -25,6 +25,12 @@ type weekSummary struct {
 	Money    *moneyWeek       `json:"money,omitempty"`
 	Receipts *receiptOverview `json:"receipts,omitempty"`
 	Invoices *invoiceOverview `json:"invoices,omitempty"`
+	People   *peopleOverview  `json:"people,omitempty"`
+}
+
+type peopleOverview struct {
+	Overdue    int `json:"overdue"`
+	WithRhythm int `json:"with_rhythm"`
 }
 
 type taskWeek struct {
@@ -100,6 +106,7 @@ func gatherWeek(now time.Time, days int, money bool) weekSummary {
 	w.Health = gatherHealth(days)
 	w.Receipts = gatherReceipts()
 	w.Invoices = gatherInvoices()
+	w.People = gatherPeople()
 	if w.Invoices != nil && !money { // amounts only when asked for, like the rest of the money data
 		w.Invoices.OpenCents, w.Invoices.OverdueCents = 0, 0
 	}
@@ -285,6 +292,21 @@ func gatherInvoices() *invoiceOverview {
 	return o
 }
 
+// gatherPeople counts only — no names in the review.
+func gatherPeople() *peopleOverview {
+	if !onPath("rolodexctl") {
+		return nil
+	}
+	var due struct {
+		Count int `json:"count"`
+	}
+	var with []struct{}
+	if !runToolJSON("rolodexctl", []string{"due", "--json"}, &due) || !runToolJSON("rolodexctl", []string{"list", "--json", "--rhythm"}, &with) || len(with) == 0 {
+		return nil
+	}
+	return &peopleOverview{Overdue: due.Count, WithRhythm: len(with)}
+}
+
 func gatherMoney(from time.Time) *moneyWeek {
 	if !onPath("budgetctl") {
 		return nil
@@ -439,6 +461,10 @@ func renderWeek(w io.Writer, s weekSummary) {
 			line += " · " + plural(i.Drafts, "draft", "drafts")
 		}
 		row("Invoices", line)
+	}
+	if p := s.People; p != nil {
+		any = true
+		row("People", fmt.Sprintf("%d overdue for a contact (of %d with a rhythm)", p.Overdue, p.WithRhythm))
 	}
 	if !any {
 		fmt.Fprintln(w, "  no tool data available")
